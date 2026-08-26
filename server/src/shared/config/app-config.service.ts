@@ -28,4 +28,8 @@ export class AppConfigService {
   get cubeNft(): AppConfig['cubeNft'] {
     return this.config.cubeNft;
   }
+
+  get database(): AppConfig['database'] {
+    return this.config.database;
+  }
 }

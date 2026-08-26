@@ -19,6 +19,9 @@ describe('AppModule (e2e)', () => {
     process.env.PORT = '3000';
     process.env.CUBE_NFT_NETWORK = 'localhost';
     process.env.CUBE_NFT_DEPLOYMENTS_DIR = FIXTURES_DIR;
+    // AppModule does not import DatabaseModule (yet — that happens per-domain as each domain
+    // module is wired in), so this only needs to satisfy env validation, not a real connection.
+    process.env.DATABASE_URL = 'mysql://user:pass@127.0.0.1:3306/cube_nft_test';
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],

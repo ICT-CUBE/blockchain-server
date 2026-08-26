@@ -1,0 +1,119 @@
+import { randomUUID } from 'node:crypto';
+
+import { Injectable } from '@nestjs/common';
+import { DataSource, type QueryDeepPartialEntity } from 'typeorm';
+
+import { NotificationDelivery, NotificationDeliveryStatus } from './notification-delivery.entity';
+
+export interface EnqueueNotificationInput {
+  notificationId: string;
+  operationId: string;
+  payload: Record<string, unknown>;
+}
+
+const DEFAULT_CLAIM_LOCK_SECONDS = 30;
+
+/**
+ * The one piece of real persistence semantics in the notification domain: atomically claiming a
+ * batch of due, unlocked outbox rows so multiple delivery workers never send the same webhook
+ * twice concurrently (TASK-04 §5/§7; delivery/backoff business logic itself is TASK-12).
+ */
+@Injectable()
+export class NotificationOutboxRepository {
+  constructor(private readonly dataSource: DataSource) {}
+
+  async enqueue(input: EnqueueNotificationInput): Promise<NotificationDelivery> {
+    const repository = this.dataSource.getRepository(NotificationDelivery);
+    const delivery = repository.create({
+      id: randomUUID(),
+      notificationId: input.notificationId,
+      operationId: input.operationId,
+      status: NotificationDeliveryStatus.PENDING,
+      payload: input.payload,
+      attemptCount: 0,
+      lastAttemptAt: null,
+      nextAttemptAt: new Date(),
+      lastError: null,
+      lockedUntil: null,
+      claimToken: null,
+    });
+    // See operation.repository.ts for why the JSON column forces this cast.
+    await repository.insert(delivery as unknown as QueryDeepPartialEntity<NotificationDelivery>);
+    return delivery;
+  }
+
+  /** Atomically claims up to `limit` due (PENDING/RETRYING, `nextAttemptAt` in the past, not
+   * currently locked by another claimer) rows for `lockSeconds`, and returns exactly those rows.
+   * Implemented as a single `UPDATE ... ORDER BY ... LIMIT` tagging the claimed rows with a fresh
+   * `claimToken`, followed by a `SELECT` on that token — MySQL does not support `SELECT ... FOR
+   * UPDATE SKIP LOCKED` combined with `ORDER BY/LIMIT` claim-and-return in one round trip, so this
+   * two-step form is the atomic primitive instead. A worker that dies mid-delivery simply leaves
+   * the row locked until `lockedUntil` passes, after which it becomes claimable again. */
+  async claimDueBatch(
+    limit: number,
+    lockSeconds = DEFAULT_CLAIM_LOCK_SECONDS,
+  ): Promise<NotificationDelivery[]> {
+    const claimToken = randomUUID();
+    const now = new Date();
+    const lockedUntil = new Date(now.getTime() + lockSeconds * 1000);
+
+    await this.dataSource.query(
+      `UPDATE outbox_notifications
+       SET claim_token = ?, locked_until = ?
+       WHERE status IN (?, ?)
+         AND next_attempt_at <= ?
+         AND (locked_until IS NULL OR locked_until < ?)
+       ORDER BY next_attempt_at ASC
+       LIMIT ?`,
+      [
+        claimToken,
+        lockedUntil,
+        NotificationDeliveryStatus.PENDING,
+        NotificationDeliveryStatus.RETRYING,
+        now,
+        now,
+        limit,
+      ],
+    );
+
+    return this.dataSource.getRepository(NotificationDelivery).find({ where: { claimToken } });
+  }
+
+  async markDelivered(id: string): Promise<void> {
+    await this.dataSource.getRepository(NotificationDelivery).update(
+      { id },
+      {
+        status: NotificationDeliveryStatus.DELIVERED,
+        lastAttemptAt: new Date(),
+        lastError: null,
+        lockedUntil: null,
+        claimToken: null,
+      },
+    );
+  }
+
+  async markAttemptFailed(
+    id: string,
+    nextStatus:
+      | NotificationDeliveryStatus.RETRYING
+      | NotificationDeliveryStatus.FAILED
+      | NotificationDeliveryStatus.REVIEW_REQUIRED,
+    nextAttemptAt: Date,
+    error: string,
+  ): Promise<void> {
+    await this.dataSource
+      .createQueryBuilder()
+      .update(NotificationDelivery)
+      .set({
+        status: nextStatus,
+        attemptCount: () => 'attempt_count + 1',
+        lastAttemptAt: new Date(),
+        nextAttemptAt,
+        lastError: error.slice(0, 255),
+        lockedUntil: null,
+        claimToken: null,
+      })
+      .where('id = :id', { id })
+      .execute();
+  }
+}

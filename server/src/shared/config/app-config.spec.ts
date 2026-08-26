@@ -10,6 +10,7 @@ function baseEnv(overrides: Partial<NodeJS.ProcessEnv> = {}): NodeJS.ProcessEnv 
     PORT: '3000',
     CUBE_NFT_NETWORK: 'localhost',
     CUBE_NFT_DEPLOYMENTS_DIR: FIXTURES_DIR,
+    DATABASE_URL: 'mysql://user:pass@127.0.0.1:3306/cube_nft_test',
     ...overrides,
   };
 }
@@ -23,11 +24,20 @@ describe('loadConfig', () => {
     expect(config.cubeNft.deployment.chainId).toBe(31337);
     expect(config.cubeNft.deployment.proxyAddress).toBe('0x1111111111111111111111111111111111111111');
     expect(config.cubeNft.abi.length).toBeGreaterThan(0);
+    expect(config.database.url).toBe('mysql://user:pass@127.0.0.1:3306/cube_nft_test');
+    expect(config.database.poolMax).toBe(10);
   });
 
   it('fails fast when a required env var is missing', () => {
     const env = baseEnv();
     delete env.CUBE_NFT_NETWORK;
+
+    expect(() => loadConfig(env)).toThrow();
+  });
+
+  it('fails fast when DATABASE_URL is missing', () => {
+    const env = baseEnv();
+    delete env.DATABASE_URL;
 
     expect(() => loadConfig(env)).toThrow();
   });

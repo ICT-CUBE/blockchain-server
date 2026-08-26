@@ -15,16 +15,25 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:integration": "jest --config ./test/jest-integration.json --runInBand",
+    "typeorm": "typeorm-ts-node-commonjs",
+    "migration:generate": "npm run typeorm -- migration:generate -d src/shared/database/data-source.ts",
+    "migration:run": "npm run typeorm -- migration:run -d src/shared/database/data-source.ts",
+    "migration:revert": "npm run typeorm -- migration:revert -d src/shared/database/data-source.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.2.1",
     "@nestjs/config": "4.0.4",
     "@nestjs/core": "11.2.1",
     "@nestjs/platform-express": "11.2.1",
+    "@nestjs/typeorm": "11.0.3",
+    "dotenv": "17.4.2",
     "ethers": "6.17.0",
+    "mysql2": "3.24.2",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
+    "typeorm": "1.1.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
