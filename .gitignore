@@ -1,0 +1,28 @@
+node_modules/
+dist/
+build/
+coverage/
+
+# secrets
+.env
+.env.*
+!.env.example
+
+*.log
+npm-debug.log*
+
+# Hardhat
+contracts/cube-nft/cache/
+contracts/cube-nft/artifacts/
+contracts/cube-nft/types/
+
+# Ephemeral local-network deployment artifacts (regenerated on every local run/test).
+# Real testnet/mainnet deployment artifacts and the shared ABI file ARE committed.
+contracts/deployments/hardhatMainnet.json
+contracts/deployments/hardhatOp.json
+
+# NestJS
+server/dist/
+
+.DS_Store
+*.tsbuildinfo

@@ -1,0 +1,29 @@
+{
+  "name": "cube-nft-blockchain",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ARZONE CUBE NFT contracts and independent Blockchain Server",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
+  "workspaces": [
+    "contracts/cube-nft",
+    "server"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=contracts/cube-nft && npm run build --workspace=server",
+    "test": "npm run test --workspace=contracts/cube-nft && npm run test --workspace=server",
+    "lint": "npm run lint --workspace=contracts/cube-nft && npm run lint --workspace=server",
+    "test:contracts": "npm run test --workspace=contracts/cube-nft",
+    "test:server": "npm run test --workspace=server",
+    "build:contracts": "npm run build --workspace=contracts/cube-nft",
+    "build:server": "npm run build --workspace=server"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "keccak@3.0.4": true,
+    "secp256k1@4.0.5": true,
+    "fsevents@2.3.3": true,
+    "unrs-resolver@1.12.2": true
+  }
+}
