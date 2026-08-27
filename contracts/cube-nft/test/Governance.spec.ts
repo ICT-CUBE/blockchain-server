@@ -104,6 +104,7 @@ describe("Governance: Timelock + multisig on-chain", function () {
       timelock,
       timelockAddress,
       admin,
+      minter,
       pauser,
       safeOwnerA,
       safeOwnerB,
@@ -218,9 +219,14 @@ describe("Governance: Timelock + multisig on-chain", function () {
     expect(await cube.paused()).to.equal(false);
   });
 
-  it("a 2-of-3-approved upgrade succeeds once the Timelock delay has elapsed", async () => {
+  it("a 2-of-3-approved upgrade succeeds once the Timelock delay has elapsed, and storage survives it", async () => {
     const ctx = await deployGovernedSystem();
-    const { cube, cubeAddress } = ctx;
+    const { cube, cubeAddress, minter } = ctx;
+
+    // Write real (non-constant) storage before the upgrade, to prove the upgrade preserves state
+    // rather than merely leaving the contract callable.
+    const [, , , , , , , recipient] = await ethers.getSigners();
+    await cube.connect(minter).mintTo(recipient.address, 7, "ipfs://bafybeigsample/7.json");
 
     const NewImplFactory = await ethers.getContractFactory("CubeNFT");
     const newImpl = await NewImplFactory.deploy();
@@ -232,7 +238,9 @@ describe("Governance: Timelock + multisig on-chain", function () {
     await networkHelpers.time.increase(MAINNET_TIMELOCK_DELAY_SECONDS + 1);
     await executeViaGovernance();
 
-    // still functions correctly post-upgrade
+    // still functions correctly post-upgrade, and the pre-upgrade storage write survived it
     expect(await cube.MAX_TOKEN_ID()).to.equal(10000);
+    expect(await cube.ownerOf(7)).to.equal(recipient.address);
+    expect(await cube.tokenURI(7)).to.equal("ipfs://bafybeigsample/7.json");
   });
 });

@@ -20,6 +20,10 @@ contracts/cube-nft/types/
 # Real testnet/mainnet deployment artifacts and the shared ABI file ARE committed.
 contracts/deployments/hardhatMainnet.json
 contracts/deployments/hardhatOp.json
+contracts/deployments/hardhatMainnet.governance.json
+contracts/deployments/hardhatOp.governance.json
+contracts/deployments/localhost.json
+contracts/deployments/localhost.governance.json
 
 # NestJS
 server/dist/
