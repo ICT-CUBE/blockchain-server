@@ -35,8 +35,13 @@ export class RpcService {
 
   constructor(appConfig: AppConfigService) {
     const { rpc } = appConfig.submission;
-    this.primary = new JsonRpcProvider(rpc.primaryUrl);
-    this.backup = rpc.backupUrl ? new JsonRpcProvider(rpc.backupUrl) : null;
+    // ethers' AbstractProvider coalesces identical low-level requests (same method+params, e.g.
+    // getBlockNumber()) made within a 250ms window by default and returns the same cached result —
+    // fine for a dapp minimizing RPC cost, wrong here: TASK-11's confirmation math reads
+    // getBlockNumber() right after driving the chain forward (mining/broadcasting), and a stale
+    // cached block number under-counts confirmations. Disabled everywhere in this service.
+    this.primary = new JsonRpcProvider(rpc.primaryUrl, undefined, { cacheTimeout: -1 });
+    this.backup = rpc.backupUrl ? new JsonRpcProvider(rpc.backupUrl, undefined, { cacheTimeout: -1 }) : null;
   }
 
   private async withFailover<T>(

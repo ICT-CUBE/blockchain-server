@@ -203,6 +203,17 @@ describe('TASK-10 transaction submission (integration, real local chain)', () =>
     const nonces = new Set(attempts.map((a) => a.transactionNonce));
     expect(nonces.size).toBe(5);
 
+    // Reservation order is DB-serialized (guaranteed gapless/unique, asserted above), but the
+    // actual `broadcastTransaction` network calls that follow each reservation are not — two
+    // submissions racing this closely can reach Hardhat out of nonce order, and Hardhat (unlike a
+    // production mempool, which queues) rejects a higher nonce arriving before its predecessor
+    // while automining. `TransactionSubmissionService` already handles this by design: a rejected
+    // broadcast just leaves that attempt at SIGNED for `SignedAttemptRecoveryWorker` to retry — so
+    // exercise that real recovery path here instead of asserting every one of the 5 raced its way
+    // to a first-try broadcast.
+    const recoveryWorker = new SignedAttemptRecoveryWorker(dataSource, submission, appConfig);
+    await (recoveryWorker as unknown as { runOnce(): Promise<void> }).runOnce();
+
     for (const s of submissions) {
       const receipt = await pollForReceipt(rpc, s.txHash);
       expect(receipt?.status).toBe(1);

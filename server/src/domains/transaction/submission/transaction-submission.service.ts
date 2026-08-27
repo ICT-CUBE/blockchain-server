@@ -93,7 +93,13 @@ export class TransactionSubmissionService implements TransactionSubmissionPort {
 
   /** Used both by `submit()` (attemptNo undefined -> first attempt) and by the pending-monitor's
    * RBF path, which supplies `replacesAttemptId` for a fee-bump replacement of an already-signed
-   * attempt (same operation, same intended nonce, higher fee). */
+   * attempt (same operation, same intended nonce, higher fee). `gasLimit` is passed in rather than
+   * re-estimated: a fee-bump replacement submits byte-for-byte the same call (only the fee differs),
+   * so its gas requirement cannot differ from the attempt it replaces — reusing that attempt's own
+   * gasLimit is both cheaper and more correct than a fresh `estimateGas`, which on some providers
+   * simulates against pending state and would see the still-unconfirmed original as already applied
+   * (a false "already minted"/double-spend-shaped revert for a transaction that can never actually
+   * conflict with itself). */
   async submitReplacement(params: {
     operationId: string;
     chainId: number;
@@ -102,6 +108,7 @@ export class TransactionSubmissionService implements TransactionSubmissionPort {
     data: string;
     value: bigint;
     nonce: string;
+    gasLimit: bigint;
     maxFeePerGas: bigint;
     maxPriorityFeePerGas: bigint;
     replacesAttemptId: string;
@@ -109,13 +116,6 @@ export class TransactionSubmissionService implements TransactionSubmissionPort {
     const attemptId = randomUUID();
     const signerAddress = this.systemSigner.addressFor(params.signerRole);
     const wallet = this.systemSigner.walletFor(params.signerRole);
-
-    const gasLimit = await this.rpc.estimateGas({
-      to: params.to,
-      data: params.data,
-      from: signerAddress,
-      value: params.value,
-    });
 
     const signedRawTransaction = await wallet.signTransaction({
       to: params.to,
@@ -125,7 +125,7 @@ export class TransactionSubmissionService implements TransactionSubmissionPort {
       chainId: params.chainId,
       maxFeePerGas: params.maxFeePerGas,
       maxPriorityFeePerGas: params.maxPriorityFeePerGas,
-      gasLimit,
+      gasLimit: params.gasLimit,
       type: 2,
     });
 

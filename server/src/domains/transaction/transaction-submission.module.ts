@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common';
 import { OperationPersistenceModule } from '../operation/persistence/operation-persistence.module';
 import { NonceCoordinator } from './nonce/nonce-coordinator.service';
 import { TransactionPersistenceModule } from './persistence/transaction-persistence.module';
-import { RpcService } from './rpc/rpc.service';
+import { RpcModule } from './rpc/rpc.module';
 import { SystemSignerService } from './signing/system-signer.service';
 import { PendingMonitorWorker } from './submission/pending-monitor.worker';
 import { SignedAttemptRecoveryWorker } from './submission/signed-attempt-recovery.worker';
@@ -18,9 +18,8 @@ import { TransactionSubmissionService } from './submission/transaction-submissio
  * `TRANSACTION_SUBMISSION_PORT` (what TASK-07+ domain workers depend on, never the concrete class).
  */
 @Module({
-  imports: [TransactionPersistenceModule, OperationPersistenceModule],
+  imports: [TransactionPersistenceModule, OperationPersistenceModule, RpcModule],
   providers: [
-    RpcService,
     SystemSignerService,
     NonceCoordinator,
     TransactionSubmissionService,
@@ -28,6 +27,6 @@ import { TransactionSubmissionService } from './submission/transaction-submissio
     SignedAttemptRecoveryWorker,
     PendingMonitorWorker,
   ],
-  exports: [RpcService, SystemSignerService, TransactionSubmissionService, TRANSACTION_SUBMISSION_PORT],
+  exports: [RpcModule, SystemSignerService, TransactionSubmissionService, TRANSACTION_SUBMISSION_PORT],
 })
 export class TransactionSubmissionModule {}

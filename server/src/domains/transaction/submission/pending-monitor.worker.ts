@@ -146,6 +146,7 @@ export class PendingMonitorWorker extends IntervalWorker {
       data: parsed.data,
       value: parsed.value,
       nonce: previous.transactionNonce,
+      gasLimit: parsed.gasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
       replacesAttemptId: previous.id,
