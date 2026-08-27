@@ -111,6 +111,10 @@ const baseEnvSchema = z.object({
   /** TASK-07: "고정 metadata URI" — a fixed, non-dynamic tokenURI convention until TASK-13 replaces
    * this with real Pinata/NFT.Storage-backed metadata. Final segment is always `${tokenId}.json`. */
   MINT_METADATA_BASE_URI: z.string().min(1).default('ipfs://pending-metadata/'),
+
+  /** TASK-08/09: how long an `OwnerConsent` signature stays valid after the worker signs it. Kept
+   * short — this is minted fresh right before each submission attempt, not handed out in advance. */
+  OWNER_CONSENT_DEADLINE_SECONDS: z.coerce.number().int().positive().default(600),
 });
 
 /** Local-only Hardhat networks whose signer/RPC config may fall back to well-known dev defaults —

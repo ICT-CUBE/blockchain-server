@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Inject, Injectable } from '@nestjs/common';
-import { getAddress } from 'ethers';
+import { getAddress, type TypedDataDomain, type TypedDataField } from 'ethers';
 import { DataSource, QueryFailedError } from 'typeorm';
 
 import { WalletAccount, WalletAccountStatus } from '../persistence/wallet-account.entity';
@@ -79,5 +79,19 @@ export class WalletService {
 
   async findByUserId(userId: string): Promise<WalletAccount | null> {
     return this.dataSource.getRepository(WalletAccount).findOne({ where: { userId } });
+  }
+
+  /** Signs EIP-712 typed data (e.g. an `OwnerConsent`, TASK-08/09) as `userId`'s custodial wallet.
+   * Thin pass-through to the bound `CustodialWalletPort` — this is the only place outside that port
+   * itself that touches signing, keeping the "never expose arbitrary raw signing" rule (TASK-05
+   * §5) centralized in one adapter contract rather than duplicated per caller. */
+  async signTypedData(
+    userId: string,
+    domain: TypedDataDomain,
+    types: Record<string, TypedDataField[]>,
+    value: Record<string, unknown>,
+    purpose: string,
+  ): Promise<string> {
+    return this.walletPort.signTypedData({ userId, domain, types, value, purpose });
   }
 }

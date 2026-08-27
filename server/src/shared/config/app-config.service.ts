@@ -56,4 +56,8 @@ export class AppConfigService {
   get mint(): AppConfig['mint'] {
     return this.config.mint;
   }
+
+  get ownerConsent(): AppConfig['ownerConsent'] {
+    return this.config.ownerConsent;
+  }
 }

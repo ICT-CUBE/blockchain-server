@@ -2,7 +2,10 @@ import { Module, type MiddlewareConsumer, type NestModule } from '@nestjs/common
 import { APP_FILTER } from '@nestjs/core';
 
 import { MintModule } from './domains/nft/mint/mint.module';
+import { TransferModule } from './domains/nft/transfer/transfer.module';
 import { OperationsHttpModule } from './domains/operation/http/operations-http.module';
+import { ConfirmationModule } from './domains/transaction/confirmation/confirmation.module';
+import { TransactionSubmissionModule } from './domains/transaction/transaction-submission.module';
 import { WalletModule } from './domains/wallet/wallet.module';
 import { ConfigModule } from './shared/config/config.module';
 import { DatabaseModule } from './shared/database/database.module';
@@ -11,7 +14,17 @@ import { ApiExceptionFilter } from './shared/http/api-exception.filter';
 import { RequestIdMiddleware } from './shared/http/request-id.middleware';
 
 @Module({
-  imports: [ConfigModule, DatabaseModule, HealthModule, MintModule, OperationsHttpModule, WalletModule],
+  imports: [
+    ConfigModule,
+    DatabaseModule,
+    HealthModule,
+    TransactionSubmissionModule,
+    ConfirmationModule,
+    MintModule,
+    TransferModule,
+    OperationsHttpModule,
+    WalletModule,
+  ],
   providers: [{ provide: APP_FILTER, useClass: ApiExceptionFilter }],
 })
 export class AppModule implements NestModule {

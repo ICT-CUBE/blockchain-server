@@ -5,6 +5,7 @@ import { AppConfigService } from '../../../shared/config/app-config.service';
 import { RpcService } from './rpc.service';
 
 const OWNER_OF_INTERFACE = new Interface(['function ownerOf(uint256) view returns (address)']);
+const CONSENT_NONCE_INTERFACE = new Interface(['function consentNonce(uint256) view returns (uint256)']);
 
 function isNonexistentTokenRevert(error: unknown): boolean {
   return (
@@ -42,5 +43,16 @@ export class CubeNftReaderService {
       }
       throw error;
     }
+  }
+
+  /** Next `OwnerConsent.nonce` value `CubeNFT.authorizedTransfer` will accept for `tokenId`
+   * (TASK-08/09) — 0 for a never-transferred token. */
+  async consentNonce(tokenId: number): Promise<bigint> {
+    const data = CONSENT_NONCE_INTERFACE.encodeFunctionData('consentNonce', [tokenId]);
+    const raw = await this.rpc
+      .getReadProvider()
+      .call({ to: this.appConfig.cubeNft.deployment.proxyAddress, data });
+    const [nonce] = CONSENT_NONCE_INTERFACE.decodeFunctionResult('consentNonce', raw);
+    return nonce as bigint;
   }
 }

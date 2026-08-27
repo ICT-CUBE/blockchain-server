@@ -75,6 +75,10 @@ export interface MintConfig {
   readonly metadataBaseUri: string;
 }
 
+export interface OwnerConsentConfig {
+  readonly deadlineSeconds: number;
+}
+
 export interface AppConfig {
   readonly nodeEnv: Env['NODE_ENV'];
   readonly port: number;
@@ -87,6 +91,7 @@ export interface AppConfig {
   readonly submission: SubmissionConfig;
   readonly confirmation: ConfirmationConfig;
   readonly mint: MintConfig;
+  readonly ownerConsent: OwnerConsentConfig;
 }
 
 /** Validates `env` against `envSchema` and loads the matching CubeNFT deployment artifact. Throws
@@ -164,6 +169,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }),
     mint: Object.freeze({
       metadataBaseUri: parsedEnv.MINT_METADATA_BASE_URI,
+    }),
+    ownerConsent: Object.freeze({
+      deadlineSeconds: parsedEnv.OWNER_CONSENT_DEADLINE_SECONDS,
     }),
   });
 }
