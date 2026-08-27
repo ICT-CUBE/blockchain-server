@@ -115,6 +115,19 @@ const baseEnvSchema = z.object({
   /** TASK-08/09: how long an `OwnerConsent` signature stays valid after the worker signs it. Kept
    * short — this is minted fresh right before each submission attempt, not handed out in advance. */
   OWNER_CONSENT_DEADLINE_SECONDS: z.coerce.number().int().positive().default(600),
+
+  /** TASK-12: outbound completion webhook to Backend. A separate HMAC key pair from
+   * HMAC_INBOUND_* — "방향별 HMAC key" — since this direction is us authenticating *to* Backend,
+   * not Backend authenticating to us. */
+  NOTIFICATION_CALLBACK_URL: z.string().min(1),
+  HMAC_OUTBOUND_KEY_ID: z.string().min(1),
+  HMAC_OUTBOUND_KEY_SECRET: minLength32Base64UrlSecret,
+  NOTIFICATION_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+  NOTIFICATION_MAX_AUTO_RETRIES: z.coerce.number().int().positive().default(6),
+  NOTIFICATION_BASE_BACKOFF_MS: z.coerce.number().int().positive().default(2000),
+  NOTIFICATION_MAX_BACKOFF_MS: z.coerce.number().int().positive().default(300000),
+  NOTIFICATION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+  NOTIFICATION_BATCH_SIZE: z.coerce.number().int().positive().default(20),
 });
 
 /** Local-only Hardhat networks whose signer/RPC config may fall back to well-known dev defaults —

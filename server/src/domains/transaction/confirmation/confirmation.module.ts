@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { NotificationPersistenceModule } from '../../notification/persistence/notification-persistence.module';
 import { OperationPersistenceModule } from '../../operation/persistence/operation-persistence.module';
 import { OperationFinalizer } from '../../operation/finalizer/operation-finalizer.service';
 import { TransactionPersistenceModule } from '../persistence/transaction-persistence.module';
@@ -11,7 +12,12 @@ import { ReconciliationScheduler } from './reconciliation.scheduler';
  * (`OperationFinalizer`), and the background scheduler that drives both across every in-flight
  * Operation (`ReconciliationScheduler`). */
 @Module({
-  imports: [TransactionPersistenceModule, OperationPersistenceModule, RpcModule],
+  imports: [
+    TransactionPersistenceModule,
+    OperationPersistenceModule,
+    RpcModule,
+    NotificationPersistenceModule,
+  ],
   providers: [ConfirmationService, OperationFinalizer, ReconciliationScheduler],
   exports: [ConfirmationService, OperationFinalizer],
 })

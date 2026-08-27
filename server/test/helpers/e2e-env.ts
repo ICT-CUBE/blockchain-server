@@ -31,4 +31,10 @@ export function applyE2eTestEnv(): void {
   process.env.TRANSACTION_RPC_URL_PRIMARY = 'http://127.0.0.1:8545';
   process.env.MINT_SIGNER_PRIVATE_KEY = `0x${'4'.repeat(64)}`;
   process.env.RELAYER_SIGNER_PRIVATE_KEY = `0x${'5'.repeat(64)}`;
+  // TASK-12: no e2e spec actually delivers a notification (that's the dedicated integration
+  // suite's job, against a real HTTP receiver) — these only need to satisfy validation so
+  // AppModule can boot.
+  process.env.NOTIFICATION_CALLBACK_URL = 'http://127.0.0.1:4100/webhook';
+  process.env.HMAC_OUTBOUND_KEY_ID = 'outbound-v1';
+  process.env.HMAC_OUTBOUND_KEY_SECRET = Buffer.alloc(32, 10).toString('base64url');
 }

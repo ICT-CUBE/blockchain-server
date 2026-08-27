@@ -79,6 +79,22 @@ export interface OwnerConsentConfig {
   readonly deadlineSeconds: number;
 }
 
+export interface HmacOutboundConfig {
+  readonly keyId: string;
+  readonly secret: Buffer;
+}
+
+export interface NotificationConfig {
+  readonly callbackUrl: string;
+  readonly hmacOutbound: HmacOutboundConfig;
+  readonly timeoutMs: number;
+  readonly maxAutoRetries: number;
+  readonly baseBackoffMs: number;
+  readonly maxBackoffMs: number;
+  readonly pollIntervalMs: number;
+  readonly batchSize: number;
+}
+
 export interface AppConfig {
   readonly nodeEnv: Env['NODE_ENV'];
   readonly port: number;
@@ -92,6 +108,7 @@ export interface AppConfig {
   readonly confirmation: ConfirmationConfig;
   readonly mint: MintConfig;
   readonly ownerConsent: OwnerConsentConfig;
+  readonly notification: NotificationConfig;
 }
 
 /** Validates `env` against `envSchema` and loads the matching CubeNFT deployment artifact. Throws
@@ -172,6 +189,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }),
     ownerConsent: Object.freeze({
       deadlineSeconds: parsedEnv.OWNER_CONSENT_DEADLINE_SECONDS,
+    }),
+    notification: Object.freeze({
+      callbackUrl: parsedEnv.NOTIFICATION_CALLBACK_URL,
+      hmacOutbound: Object.freeze({
+        keyId: parsedEnv.HMAC_OUTBOUND_KEY_ID,
+        secret: Buffer.from(parsedEnv.HMAC_OUTBOUND_KEY_SECRET, 'base64url'),
+      }),
+      timeoutMs: parsedEnv.NOTIFICATION_TIMEOUT_MS,
+      maxAutoRetries: parsedEnv.NOTIFICATION_MAX_AUTO_RETRIES,
+      baseBackoffMs: parsedEnv.NOTIFICATION_BASE_BACKOFF_MS,
+      maxBackoffMs: parsedEnv.NOTIFICATION_MAX_BACKOFF_MS,
+      pollIntervalMs: parsedEnv.NOTIFICATION_POLL_INTERVAL_MS,
+      batchSize: parsedEnv.NOTIFICATION_BATCH_SIZE,
     }),
   });
 }

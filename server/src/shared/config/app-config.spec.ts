@@ -27,6 +27,9 @@ function baseEnv(overrides: Partial<NodeJS.ProcessEnv> = {}): NodeJS.ProcessEnv 
     TRANSACTION_RPC_URL_PRIMARY: 'http://127.0.0.1:8545',
     MINT_SIGNER_PRIVATE_KEY: TEST_MINT_SIGNER_PRIVATE_KEY,
     RELAYER_SIGNER_PRIVATE_KEY: TEST_RELAYER_SIGNER_PRIVATE_KEY,
+    NOTIFICATION_CALLBACK_URL: 'http://127.0.0.1:4100/webhook',
+    HMAC_OUTBOUND_KEY_ID: 'outbound-v1',
+    HMAC_OUTBOUND_KEY_SECRET: Buffer.alloc(32, 4).toString('base64url'),
     ...overrides,
   };
 }

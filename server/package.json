@@ -20,7 +20,9 @@
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:generate": "npm run typeorm -- migration:generate -d src/shared/database/data-source.ts",
     "migration:run": "npm run typeorm -- migration:run -d src/shared/database/data-source.ts",
-    "migration:revert": "npm run typeorm -- migration:revert -d src/shared/database/data-source.ts"
+    "migration:revert": "npm run typeorm -- migration:revert -d src/shared/database/data-source.ts",
+    "redeliver": "ts-node -r tsconfig-paths/register scripts/redeliver-notification.ts",
+    "mock-receiver": "ts-node -r tsconfig-paths/register mock-receiver/server.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.2.1",

@@ -62,9 +62,10 @@ export class AssetLockRepository {
 
   /** Releases whichever lock is currently ACTIVE for `tokenId`, if any. Idempotent: releasing an
    * already-released (or never-locked) tokenId is a no-op, since multiple call sites in the Asset
-   * Lock 해제 Matrix may reach this defensively. */
-  async release(tokenId: number): Promise<void> {
-    await this.dataSource
+   * Lock 해제 Matrix may reach this defensively. Pass `manager` to release atomically alongside
+   * other writes (see `OperationRepository.transition`'s identical note). */
+  async release(tokenId: number, manager?: EntityManager): Promise<void> {
+    await (manager ?? this.dataSource)
       .createQueryBuilder()
       .update(AssetLock)
       .set({

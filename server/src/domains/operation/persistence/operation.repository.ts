@@ -152,36 +152,55 @@ export class OperationRepository {
   /** Compare-and-swap status transition: succeeds only if the row's current status still equals
    * `expectedStatus` at the moment of the UPDATE, implemented as a single atomic
    * `UPDATE ... WHERE id = ? AND status = ?` (not a read-then-write race). Appends the matching
-   * `OperationStateHistory` row in the same DB transaction. */
+   * `OperationStateHistory` row in the same DB transaction.
+   *
+   * Pass `manager` to make this transition atomic alongside other writes — e.g. TASK-12's
+   * `OperationFinalizer`, which must commit the ONCHAIN_CONFIRMED transition, the winning attempt
+   * update, the asset lock release, and the notification outbox row together or not at all. Omit it
+   * to let this method open its own transaction for a standalone call. */
   async transition(
     operationId: string,
     expectedStatus: OperationStatus,
     nextStatus: OperationStatus,
     reason: string,
+    manager?: EntityManager,
   ): Promise<Operation> {
-    return this.dataSource.transaction(async (manager) => {
-      const result = await manager
-        .createQueryBuilder()
-        .update(Operation)
-        .set({ status: nextStatus, version: () => 'version + 1' })
-        .where('id = :operationId', { operationId })
-        .andWhere('status = :expectedStatus', { expectedStatus })
-        .execute();
+    if (manager) {
+      return this.transitionWithManager(manager, operationId, expectedStatus, nextStatus, reason);
+    }
+    return this.dataSource.transaction((txManager) =>
+      this.transitionWithManager(txManager, operationId, expectedStatus, nextStatus, reason),
+    );
+  }
 
-      if (result.affected !== 1) {
-        throw new InvalidOperationTransitionError(operationId, expectedStatus, nextStatus);
-      }
+  private async transitionWithManager(
+    manager: EntityManager,
+    operationId: string,
+    expectedStatus: OperationStatus,
+    nextStatus: OperationStatus,
+    reason: string,
+  ): Promise<Operation> {
+    const result = await manager
+      .createQueryBuilder()
+      .update(Operation)
+      .set({ status: nextStatus, version: () => 'version + 1' })
+      .where('id = :operationId', { operationId })
+      .andWhere('status = :expectedStatus', { expectedStatus })
+      .execute();
 
-      await manager.insert(OperationStateHistory, {
-        id: randomUUID(),
-        operationId,
-        fromStatus: expectedStatus,
-        toStatus: nextStatus,
-        reason,
-      });
+    if (result.affected !== 1) {
+      throw new InvalidOperationTransitionError(operationId, expectedStatus, nextStatus);
+    }
 
-      return manager.findOneOrFail(Operation, { where: { id: operationId } });
+    await manager.insert(OperationStateHistory, {
+      id: randomUUID(),
+      operationId,
+      fromStatus: expectedStatus,
+      toStatus: nextStatus,
+      reason,
     });
+
+    return manager.findOneOrFail(Operation, { where: { id: operationId } });
   }
 
   async findById(operationId: string): Promise<Operation | null> {

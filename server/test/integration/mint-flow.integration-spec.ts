@@ -16,6 +16,7 @@ import { ConfirmationService } from '../../src/domains/transaction/confirmation/
 import { NonceCoordinator } from '../../src/domains/transaction/nonce/nonce-coordinator.service';
 import { ApprovalJtiBindingRepository } from '../../src/domains/transaction/persistence/approval-jti-binding.repository';
 import { AssetLockRepository } from '../../src/domains/transaction/persistence/asset-lock.repository';
+import { NotificationOutboxRepository } from '../../src/domains/notification/persistence/notification-outbox.repository';
 import { CubeNftReaderService } from '../../src/domains/transaction/rpc/cube-nft-reader.service';
 import { RpcService } from '../../src/domains/transaction/rpc/rpc.service';
 import { SystemSignerService } from '../../src/domains/transaction/signing/system-signer.service';
@@ -48,6 +49,9 @@ function setEnv(): void {
   process.env.TRANSACTION_RPC_URL_PRIMARY = RPC_URL;
   process.env.MINT_SIGNER_PRIVATE_KEY = MINT_SIGNER_PRIVATE_KEY;
   process.env.RELAYER_SIGNER_PRIVATE_KEY = RELAYER_SIGNER_PRIVATE_KEY;
+  process.env.NOTIFICATION_CALLBACK_URL = 'http://127.0.0.1:4100/webhook';
+  process.env.HMAC_OUTBOUND_KEY_ID = 'outbound-v1';
+  process.env.HMAC_OUTBOUND_KEY_SECRET = Buffer.alloc(32, 21).toString('base64url');
   process.env.CONFIRMATION_BLOCKS_REQUIRED = '5';
 }
 
@@ -149,7 +153,12 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
     );
 
     confirmationService = new ConfirmationService(dataSource, rpc, appConfig);
-    finalizer = new OperationFinalizer(dataSource, operationRepository, assetLockRepository);
+    finalizer = new OperationFinalizer(
+      dataSource,
+      operationRepository,
+      assetLockRepository,
+      new NotificationOutboxRepository(dataSource),
+    );
 
     mintInterface = new Interface(appConfig.cubeNft.abi as never);
     chainId = appConfig.cubeNft.deployment.chainId;

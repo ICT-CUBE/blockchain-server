@@ -60,4 +60,8 @@ export class AppConfigService {
   get ownerConsent(): AppConfig['ownerConsent'] {
     return this.config.ownerConsent;
   }
+
+  get notification(): AppConfig['notification'] {
+    return this.config.notification;
+  }
 }

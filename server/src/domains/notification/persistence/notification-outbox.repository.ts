@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Injectable } from '@nestjs/common';
-import { DataSource, type QueryDeepPartialEntity } from 'typeorm';
+import { DataSource, type EntityManager, type QueryDeepPartialEntity } from 'typeorm';
 
 import { NotificationDelivery, NotificationDeliveryStatus } from './notification-delivery.entity';
 
@@ -22,8 +22,11 @@ const DEFAULT_CLAIM_LOCK_SECONDS = 30;
 export class NotificationOutboxRepository {
   constructor(private readonly dataSource: DataSource) {}
 
-  async enqueue(input: EnqueueNotificationInput): Promise<NotificationDelivery> {
-    const repository = this.dataSource.getRepository(NotificationDelivery);
+  /** Pass `manager` to enqueue atomically alongside the Operation reaching ONCHAIN_CONFIRMED (see
+   * `OperationRepository.transition`'s identical note) — this is what makes it an outbox rather
+   * than a plain queue insert. */
+  async enqueue(input: EnqueueNotificationInput, manager?: EntityManager): Promise<NotificationDelivery> {
+    const repository = (manager ?? this.dataSource).getRepository(NotificationDelivery);
     const delivery = repository.create({
       id: randomUUID(),
       notificationId: input.notificationId,
@@ -90,6 +93,34 @@ export class NotificationOutboxRepository {
         claimToken: null,
       },
     );
+  }
+
+  async findByNotificationId(notificationId: string): Promise<NotificationDelivery | null> {
+    return this.dataSource.getRepository(NotificationDelivery).findOne({ where: { notificationId } });
+  }
+
+  /** TASK-12 §5's manual redelivery path: resets a REVIEW_REQUIRED/FAILED row back to PENDING with
+   * `nextAttemptAt` now and `attemptCount` untouched (the history of prior attempts is preserved,
+   * not reset), so the next delivery-worker tick picks it up immediately under the *same*
+   * `notificationId` (the receiver's own dedup key is unchanged — this is a redelivery, not a new
+   * notification). */
+  async resetForRedelivery(notificationId: string): Promise<NotificationDelivery> {
+    await this.dataSource
+      .createQueryBuilder()
+      .update(NotificationDelivery)
+      .set({
+        status: NotificationDeliveryStatus.PENDING,
+        nextAttemptAt: new Date(),
+        lockedUntil: null,
+        claimToken: null,
+      })
+      .where('notification_id = :notificationId', { notificationId })
+      .execute();
+    const updated = await this.findByNotificationId(notificationId);
+    if (!updated) {
+      throw new Error(`No notification found with notificationId ${notificationId}`);
+    }
+    return updated;
   }
 
   async markAttemptFailed(

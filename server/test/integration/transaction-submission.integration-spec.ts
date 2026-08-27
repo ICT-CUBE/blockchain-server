@@ -52,6 +52,9 @@ function setEnv(): void {
   process.env.TRANSACTION_RPC_URL_PRIMARY = RPC_URL;
   process.env.MINT_SIGNER_PRIVATE_KEY = MINT_SIGNER_PRIVATE_KEY;
   process.env.RELAYER_SIGNER_PRIVATE_KEY = RELAYER_SIGNER_PRIVATE_KEY;
+  process.env.NOTIFICATION_CALLBACK_URL = 'http://127.0.0.1:4100/webhook';
+  process.env.HMAC_OUTBOUND_KEY_ID = 'outbound-v1';
+  process.env.HMAC_OUTBOUND_KEY_SECRET = Buffer.alloc(32, 21).toString('base64url');
   process.env.RBF_THRESHOLD_MS = '1'; // irrelevant to whether an attempt is due; the pending-monitor
   // test backdates broadcastAt directly rather than waiting on this.
 }
