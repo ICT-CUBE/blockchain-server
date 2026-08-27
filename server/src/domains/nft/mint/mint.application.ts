@@ -9,6 +9,7 @@ import {
   OperationIntakeService,
   type AcceptApprovedMutationResult,
 } from '../../../shared/idempotency/operation-intake.service';
+import { MetadataService } from '../../metadata/application/metadata.service';
 import { CubeNftReaderService } from '../../transaction/rpc/cube-nft-reader.service';
 import { WalletService } from '../../wallet/application/wallet.service';
 import type { MintRequestBody } from './mint-request.schema';
@@ -18,6 +19,10 @@ import type { MintRequestBody } from './mint-request.schema';
  * user's custodial wallet on file and requires the JWT to agree with it, then hashes the
  * *resolved* address (not the raw claim) into the idempotency command hash. A wallet lookup
  * failure or JWT/wallet mismatch is rejected before any Operation or asset lock is created.
+ *
+ * Also enforces TASK-13 §5's "전부 hot pin 완료되기 전... Mint를 접수하지 않는다": unlike the
+ * best-effort owner pre-check below, metadata readiness is a local DB read (no external network
+ * dependency, no partial-availability concern), so this is a hard gate, not best-effort.
  */
 @Injectable()
 export class MintApplication {
@@ -27,6 +32,7 @@ export class MintApplication {
     private readonly walletService: WalletService,
     private readonly operationIntake: OperationIntakeService,
     private readonly cubeNftReader: CubeNftReaderService,
+    private readonly metadataService: MetadataService,
   ) {}
 
   async accept(body: MintRequestBody, approval: MintApprovalClaims): Promise<AcceptApprovedMutationResult> {
@@ -49,6 +55,15 @@ export class MintApplication {
         'APPROVAL_TO_MISMATCH',
         'Approval token "to" does not match the custodial wallet on file for this user',
         403,
+      );
+    }
+
+    const metadataReady = await this.metadataService.isReady(body.tokenId);
+    if (!metadataReady) {
+      throw new ApiError(
+        'METADATA_NOT_READY',
+        `Metadata for tokenId ${body.tokenId} is not fully pinned yet — call POST /internal/v1/metadata first`,
+        409,
       );
     }
 

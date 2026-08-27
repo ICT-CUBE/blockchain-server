@@ -7,6 +7,7 @@ import { MintModule } from './domains/nft/mint/mint.module';
 import { ReentryModule } from './domains/nft/reentry/reentry.module';
 import { TransferModule } from './domains/nft/transfer/transfer.module';
 import { WithdrawalModule } from './domains/nft/withdrawal/withdrawal.module';
+import { MetadataModule } from './domains/metadata/metadata.module';
 import { NotificationModule } from './domains/notification/notification.module';
 import { OperationsHttpModule } from './domains/operation/http/operations-http.module';
 import { ConfirmationModule } from './domains/transaction/confirmation/confirmation.module';
@@ -31,6 +32,7 @@ import { RequestIdMiddleware } from './shared/http/request-id.middleware';
     ReentryModule,
     ExternalResaleModule,
     ExternalConsentChallengeModule,
+    MetadataModule,
     NotificationModule,
     OperationsHttpModule,
     WalletModule,

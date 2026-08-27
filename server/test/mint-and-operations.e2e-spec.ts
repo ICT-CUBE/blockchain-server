@@ -21,6 +21,7 @@ import { signApprovalJwt } from './helpers/jwt-sign';
 
 const MINTS_PATH = '/internal/v1/mints';
 const WALLETS_PATH = '/internal/v1/wallets';
+const METADATA_PATH = '/internal/v1/metadata';
 // Any well-formed address works as the "wrong purpose"/claim-mismatch tests' JWT `to` — those
 // requests are rejected before MintApplication ever resolves a wallet, so it never needs to be a
 // real provisioned wallet.
@@ -113,6 +114,27 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
     return (response.body as { address: string }).address;
   }
 
+  /** TASK-13: MintApplication.accept() requires metadata to be READY first. */
+  async function prepareMetadataFor(tokenId: number): Promise<void> {
+    const bodyString = JSON.stringify({
+      tokenId,
+      cubeNumber: `CUBE-${tokenId}`,
+      publicGrade: 'A',
+      imageBase64: Buffer.from(`fixture-image-${tokenId}`).toString('base64'),
+      benefitReferenceId: `benefit-${tokenId}`,
+    });
+    const response = await request(server())
+      .post(METADATA_PATH)
+      .set('Content-Type', 'application/json')
+      .set(hmacFor(bodyString, { path: METADATA_PATH }))
+      .send(bodyString);
+    if (response.status !== 200) {
+      throw new Error(
+        `Failed to prepare test metadata for tokenId ${tokenId}: ${response.status} ${JSON.stringify(response.body)}`,
+      );
+    }
+  }
+
   function jwtFor(body: MintBody, to: string, claimOverrides: Record<string, unknown> = {}) {
     return signApprovalJwt({
       claims: buildMintClaims(body, to, claimOverrides),
@@ -124,6 +146,7 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
 
   it('accepts a fully valid request with 202 and REQUESTED status, then it is readable via GET', async () => {
     const tokenId = randomTokenId();
+    await prepareMetadataFor(tokenId);
     const body: MintBody = { idempotencyKey: randomUUID(), userId: 'user-1', cubeId: 'cube-1', tokenId };
     const bodyString = JSON.stringify(body);
     const token = jwtFor(body, await walletAddressFor(body.userId));
@@ -227,6 +250,7 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
       cubeId: 'cube-6',
       tokenId: randomTokenId(),
     };
+    await prepareMetadataFor(body.tokenId);
     const bodyString = JSON.stringify(body);
     const headers = hmacFor(bodyString);
     const token = jwtFor(body, await walletAddressFor(body.userId));
@@ -303,6 +327,7 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
       cubeId: 'cube-10',
       tokenId: randomTokenId(),
     };
+    await prepareMetadataFor(body.tokenId);
     const bodyString = JSON.stringify(body);
     const walletAddress = await walletAddressFor(body.userId);
 
@@ -326,6 +351,7 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
       cubeId: 'cube-11',
       tokenId: randomTokenId(),
     };
+    await prepareMetadataFor(first.tokenId);
     const firstBodyString = JSON.stringify(first);
     const firstResponse = await post(firstBodyString, hmacFor(firstBodyString), jwtFor(first, walletAddress));
     expect(firstResponse.status).toBe(202);
@@ -336,6 +362,7 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
       cubeId: 'cube-11',
       tokenId: randomTokenId(),
     };
+    await prepareMetadataFor(second.tokenId);
     const secondBodyString = JSON.stringify(second);
     const secondResponse = await post(
       secondBodyString,

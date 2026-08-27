@@ -12,6 +12,9 @@ import { ApiError } from '../../src/shared/http/api-error';
 import { OperationIntakeService } from '../../src/shared/idempotency/operation-intake.service';
 import { MintApplication } from '../../src/domains/nft/mint/mint.application';
 import { MintWorker } from '../../src/domains/nft/mint/mint.worker';
+import { MetadataService } from '../../src/domains/metadata/application/metadata.service';
+import { FakePinningAdapter } from '../../src/domains/metadata/providers/fake-pinning.adapter';
+import { FakePreservationAdapter } from '../../src/domains/metadata/providers/fake-preservation.adapter';
 import { ConfirmationService } from '../../src/domains/transaction/confirmation/confirmation.service';
 import { NonceCoordinator } from '../../src/domains/transaction/nonce/nonce-coordinator.service';
 import { ApprovalJtiBindingRepository } from '../../src/domains/transaction/persistence/approval-jti-binding.repository';
@@ -95,6 +98,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
   let walletService: WalletService;
   let mintApplication: MintApplication;
   let mintWorker: MintWorker;
+  let metadataService: MetadataService;
   let operationRepository: OperationRepository;
   let confirmationService: ConfirmationService;
   let finalizer: OperationFinalizer;
@@ -106,6 +110,17 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
     for (let i = 0; i < count; i += 1) {
       await rpc.getReadProvider().send('evm_mine', []);
     }
+  }
+
+  /** TASK-13: MintApplication.accept() now requires metadata to be READY first. */
+  async function prepareMetadata(tokenId: number): Promise<void> {
+    await metadataService.prepare({
+      tokenId,
+      cubeNumber: `CUBE-${tokenId}`,
+      publicGrade: 'A',
+      imageBase64: Buffer.from(`fixture-image-${tokenId}`).toString('base64'),
+      benefitReferenceId: `benefit-${tokenId}`,
+    });
   }
 
   beforeAll(async () => {
@@ -130,7 +145,13 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
       new ApprovalJtiBindingRepository(dataSource),
       new AssetLockRepository(dataSource),
     );
-    mintApplication = new MintApplication(walletService, operationIntake, cubeNftReader);
+    metadataService = new MetadataService(
+      new FakePinningAdapter(),
+      new FakePreservationAdapter(),
+      dataSource,
+      appConfig,
+    );
+    mintApplication = new MintApplication(walletService, operationIntake, cubeNftReader, metadataService);
 
     const nonceCoordinator = new NonceCoordinator(dataSource, rpc);
     const systemSigner = new SystemSignerService(appConfig);
@@ -148,6 +169,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
       operationRepository,
       assetLockRepository,
       cubeNftReader,
+      metadataService,
       submission,
       appConfig,
     );
@@ -175,6 +197,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
     const userId = `user-${randomUUID()}`;
     const cubeId = `cube-${randomUUID()}`;
     const tokenId = randomTokenId();
+    await prepareMetadata(tokenId);
 
     const wallet = await walletService.getOrCreate(userId);
     const approval = mintApproval({ tokenId, userId, cubeId, to: wallet.address });
@@ -211,6 +234,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
     const otherUserId = `user-${randomUUID()}`;
     const cubeId = `cube-${randomUUID()}`;
     const tokenId = randomTokenId();
+    await prepareMetadata(tokenId);
 
     const ownerWallet = await walletService.getOrCreate(ownerUserId);
     const firstApproval = mintApproval({ tokenId, userId: ownerUserId, cubeId, to: ownerWallet.address });
@@ -249,6 +273,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
     const userId = `user-${randomUUID()}`;
     const cubeId = `cube-${randomUUID()}`;
     const tokenId = randomTokenId();
+    await prepareMetadata(tokenId);
     const wallet = await walletService.getOrCreate(userId);
 
     // Mint it once directly against the chain, bypassing our own flow, to simulate "this Operation

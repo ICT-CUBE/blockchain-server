@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { ApprovalJwtAuthModule } from '../../../shared/auth/approval-jwt/approval-jwt-auth.module';
 import { HmacAuthModule } from '../../../shared/auth/hmac/hmac-auth.module';
 import { OperationIntakeModule } from '../../../shared/idempotency/operation-intake.module';
+import { MetadataModule } from '../../metadata/metadata.module';
 import { OperationPersistenceModule } from '../../operation/persistence/operation-persistence.module';
 import { TransactionPersistenceModule } from '../../transaction/persistence/transaction-persistence.module';
 import { RpcModule } from '../../transaction/rpc/rpc.module';
@@ -22,6 +23,7 @@ import { MintWorker } from './mint.worker';
     TransactionSubmissionModule,
     RpcModule,
     WalletModule,
+    MetadataModule,
   ],
   controllers: [MintController],
   providers: [MintApplication, MintWorker],

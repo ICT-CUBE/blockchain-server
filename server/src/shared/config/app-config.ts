@@ -71,10 +71,6 @@ export interface ConfirmationConfig {
   readonly reconciliationBatchSize: number;
 }
 
-export interface MintConfig {
-  readonly metadataBaseUri: string;
-}
-
 export interface OwnerConsentConfig {
   readonly deadlineSeconds: number;
 }
@@ -82,6 +78,13 @@ export interface OwnerConsentConfig {
 export interface HmacOutboundConfig {
   readonly keyId: string;
   readonly secret: Buffer;
+}
+
+export interface MetadataConfig {
+  readonly provider: 'fake' | 'real';
+  readonly pinataJwt: string | null;
+  readonly nftStorageToken: string | null;
+  readonly httpTimeoutMs: number;
 }
 
 export interface NotificationConfig {
@@ -106,9 +109,9 @@ export interface AppConfig {
   readonly web3Auth: Web3AuthConfig;
   readonly submission: SubmissionConfig;
   readonly confirmation: ConfirmationConfig;
-  readonly mint: MintConfig;
   readonly ownerConsent: OwnerConsentConfig;
   readonly notification: NotificationConfig;
+  readonly metadata: MetadataConfig;
 }
 
 /** Validates `env` against `envSchema` and loads the matching CubeNFT deployment artifact. Throws
@@ -184,9 +187,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       reconciliationPollIntervalMs: parsedEnv.RECONCILIATION_POLL_INTERVAL_MS,
       reconciliationBatchSize: parsedEnv.RECONCILIATION_BATCH_SIZE,
     }),
-    mint: Object.freeze({
-      metadataBaseUri: parsedEnv.MINT_METADATA_BASE_URI,
-    }),
     ownerConsent: Object.freeze({
       deadlineSeconds: parsedEnv.OWNER_CONSENT_DEADLINE_SECONDS,
     }),
@@ -202,6 +202,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       maxBackoffMs: parsedEnv.NOTIFICATION_MAX_BACKOFF_MS,
       pollIntervalMs: parsedEnv.NOTIFICATION_POLL_INTERVAL_MS,
       batchSize: parsedEnv.NOTIFICATION_BATCH_SIZE,
+    }),
+    metadata: Object.freeze({
+      provider: parsedEnv.METADATA_PROVIDER,
+      pinataJwt: parsedEnv.PINATA_JWT ?? null,
+      nftStorageToken: parsedEnv.NFT_STORAGE_TOKEN ?? null,
+      httpTimeoutMs: parsedEnv.METADATA_HTTP_TIMEOUT_MS,
     }),
   });
 }

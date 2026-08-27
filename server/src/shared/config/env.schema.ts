@@ -108,10 +108,6 @@ const baseEnvSchema = z.object({
   RECONCILIATION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   RECONCILIATION_BATCH_SIZE: z.coerce.number().int().positive().default(20),
 
-  /** TASK-07: "고정 metadata URI" — a fixed, non-dynamic tokenURI convention until TASK-13 replaces
-   * this with real Pinata/NFT.Storage-backed metadata. Final segment is always `${tokenId}.json`. */
-  MINT_METADATA_BASE_URI: z.string().min(1).default('ipfs://pending-metadata/'),
-
   /** TASK-08/09: how long an `OwnerConsent` signature stays valid after the worker signs it. Kept
    * short — this is minted fresh right before each submission attempt, not handed out in advance. */
   OWNER_CONSENT_DEADLINE_SECONDS: z.coerce.number().int().positive().default(600),
@@ -128,6 +124,16 @@ const baseEnvSchema = z.object({
   NOTIFICATION_MAX_BACKOFF_MS: z.coerce.number().int().positive().default(300000),
   NOTIFICATION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   NOTIFICATION_BATCH_SIZE: z.coerce.number().int().positive().default(20),
+
+  /** TASK-13: "fake" (default) is a deterministic, content-addressed local stand-in — always
+   * available, no external credentials, real enough to test the whole pipeline (dependency
+   * tracking, READY gating, tokenURI) against. "real" binds the actual Pinata/NFT.Storage
+   * adapters; see PinataPinningAdapter/NftStoragePreservationAdapter for exactly what that then
+   * requires. */
+  METADATA_PROVIDER: z.enum(['fake', 'real']).default('fake'),
+  PINATA_JWT: z.string().min(1).optional(),
+  NFT_STORAGE_TOKEN: z.string().min(1).optional(),
+  METADATA_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
 });
 
 /** Local-only Hardhat networks whose signer/RPC config may fall back to well-known dev defaults —
@@ -166,6 +172,14 @@ export const envSchema = baseEnvSchema
   .refine((env) => env.CUSTODIAL_WALLET_PROVIDER !== 'web3auth' || Boolean(env.WEB3AUTH_RPC_TARGET), {
     message: 'WEB3AUTH_RPC_TARGET is required when CUSTODIAL_WALLET_PROVIDER=web3auth',
     path: ['WEB3AUTH_RPC_TARGET'],
+  })
+  .refine((env) => env.METADATA_PROVIDER !== 'real' || Boolean(env.PINATA_JWT), {
+    message: 'PINATA_JWT is required when METADATA_PROVIDER=real',
+    path: ['PINATA_JWT'],
+  })
+  .refine((env) => env.METADATA_PROVIDER !== 'real' || Boolean(env.NFT_STORAGE_TOKEN), {
+    message: 'NFT_STORAGE_TOKEN is required when METADATA_PROVIDER=real',
+    path: ['NFT_STORAGE_TOKEN'],
   });
 
 export type Env = z.infer<typeof envSchema>;

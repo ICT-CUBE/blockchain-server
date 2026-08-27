@@ -53,15 +53,15 @@ export class AppConfigService {
     return this.config.confirmation;
   }
 
-  get mint(): AppConfig['mint'] {
-    return this.config.mint;
-  }
-
   get ownerConsent(): AppConfig['ownerConsent'] {
     return this.config.ownerConsent;
   }
 
   get notification(): AppConfig['notification'] {
     return this.config.notification;
+  }
+
+  get metadata(): AppConfig['metadata'] {
+    return this.config.metadata;
   }
 }

@@ -6,6 +6,7 @@ import { AppConfigService } from '../../../shared/config/app-config.service';
 import { OperationStatus } from '../../../shared/domain/operation-status.enum';
 import { OperationType } from '../../../shared/domain/operation-type.enum';
 import { IntervalWorker } from '../../../shared/scheduling/interval-worker';
+import { MetadataService } from '../../metadata/application/metadata.service';
 import { Operation } from '../../operation/persistence/operation.entity';
 import { OperationRepository } from '../../operation/persistence/operation.repository';
 import { AssetLockRepository } from '../../transaction/persistence/asset-lock.repository';
@@ -38,6 +39,7 @@ export class MintWorker extends IntervalWorker {
     private readonly operationRepository: OperationRepository,
     private readonly assetLockRepository: AssetLockRepository,
     private readonly cubeNftReader: CubeNftReaderService,
+    private readonly metadataService: MetadataService,
     @Inject(TRANSACTION_SUBMISSION_PORT) private readonly submission: TransactionSubmissionPort,
     private readonly appConfig: AppConfigService,
   ) {
@@ -82,7 +84,18 @@ export class MintWorker extends IntervalWorker {
       return;
     }
 
-    const tokenUri = `${this.appConfig.mint.metadataBaseUri}${operation.tokenId}.json`;
+    // MintApplication.accept() already required metadata to be READY before this Operation could
+    // exist, but re-check here too — the only source of truth for "what tokenUri to mint with" is
+    // TASK-13's own tracking, never re-derived from a fixed pattern.
+    const tokenUri = await this.metadataService.tokenUri(operation.tokenId);
+    if (!tokenUri) {
+      await this.transitionQuietly(
+        operation.id,
+        OperationStatus.REVIEW_REQUIRED,
+        'METADATA_NOT_READY_AT_SUBMIT',
+      );
+      return;
+    }
     const data = MINT_INTERFACE.encodeFunctionData('mintTo', [expectedOwner, operation.tokenId, tokenUri]);
 
     await this.submission.submit({
