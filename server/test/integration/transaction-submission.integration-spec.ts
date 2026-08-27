@@ -8,6 +8,9 @@ import { AppConfigService } from '../../src/shared/config/app-config.service';
 import { OperationStatus } from '../../src/shared/domain/operation-status.enum';
 import { OperationType } from '../../src/shared/domain/operation-type.enum';
 import { TransactionAttemptStatus } from '../../src/shared/domain/transaction-attempt-status.enum';
+import { AuditWriter } from '../../src/domains/audit/application/audit-writer';
+import { AuditRecord } from '../../src/domains/audit/persistence/audit-record.entity';
+import { FailureRecord } from '../../src/domains/audit/persistence/failure-record.entity';
 import { OperationRepository } from '../../src/domains/operation/persistence/operation.repository';
 import { encryptRawTransaction } from '../../src/domains/transaction/encryption/raw-transaction-cipher';
 import { NonceCoordinator } from '../../src/domains/transaction/nonce/nonce-coordinator.service';
@@ -45,6 +48,8 @@ function setEnv(): void {
     process.env.DATABASE_URL ?? 'mysql://cube_nft:cube_nft_test_pw@127.0.0.1:3307/cube_nft_test';
   process.env.HMAC_INBOUND_KEY_ID = 'backend-v1';
   process.env.HMAC_INBOUND_KEY_SECRET = Buffer.alloc(32, 1).toString('base64url');
+  process.env.HMAC_OPERATOR_KEY_ID = 'operator-v1';
+  process.env.HMAC_OPERATOR_KEY_SECRET = Buffer.alloc(32, 101).toString('base64url');
   process.env.APPROVAL_JWT_SECRET = Buffer.alloc(32, 2).toString('base64url');
   process.env.APPROVAL_JWT_ISSUER = 'arzone-backend';
   process.env.APPROVAL_JWT_AUDIENCE = 'arzone-blockchain-server';
@@ -327,6 +332,10 @@ describe('TASK-10 transaction submission (integration, real local chain)', () =>
         .where('id = :id', { id: result.attemptId })
         .execute();
 
+      const auditWriter = new AuditWriter(
+        dataSource.getRepository(AuditRecord),
+        dataSource.getRepository(FailureRecord),
+      );
       const pendingMonitor = new PendingMonitorWorker(
         dataSource,
         rpc,
@@ -334,6 +343,7 @@ describe('TASK-10 transaction submission (integration, real local chain)', () =>
         systemSigner,
         operationRepository,
         appConfig,
+        auditWriter,
       );
       await (pendingMonitor as unknown as { runOnce(): Promise<void> }).runOnce();
 

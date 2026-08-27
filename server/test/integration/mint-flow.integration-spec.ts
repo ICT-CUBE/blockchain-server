@@ -10,6 +10,9 @@ import { OperationType } from '../../src/shared/domain/operation-type.enum';
 import type { MintApprovalClaims } from '../../src/shared/auth/approval-jwt/approval-jwt-claims';
 import { ApiError } from '../../src/shared/http/api-error';
 import { OperationIntakeService } from '../../src/shared/idempotency/operation-intake.service';
+import { AuditWriter } from '../../src/domains/audit/application/audit-writer';
+import { AuditRecord } from '../../src/domains/audit/persistence/audit-record.entity';
+import { FailureRecord } from '../../src/domains/audit/persistence/failure-record.entity';
 import { MintApplication } from '../../src/domains/nft/mint/mint.application';
 import { MintWorker } from '../../src/domains/nft/mint/mint.worker';
 import { MetadataService } from '../../src/domains/metadata/application/metadata.service';
@@ -45,6 +48,8 @@ function setEnv(): void {
     process.env.DATABASE_URL ?? 'mysql://cube_nft:cube_nft_test_pw@127.0.0.1:3307/cube_nft_test';
   process.env.HMAC_INBOUND_KEY_ID = 'backend-v1';
   process.env.HMAC_INBOUND_KEY_SECRET = Buffer.alloc(32, 1).toString('base64url');
+  process.env.HMAC_OPERATOR_KEY_ID = 'operator-v1';
+  process.env.HMAC_OPERATOR_KEY_SECRET = Buffer.alloc(32, 101).toString('base64url');
   process.env.APPROVAL_JWT_SECRET = Buffer.alloc(32, 2).toString('base64url');
   process.env.APPROVAL_JWT_ISSUER = 'arzone-backend';
   process.env.APPROVAL_JWT_AUDIENCE = 'arzone-blockchain-server';
@@ -164,6 +169,10 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
     );
     operationRepository = new OperationRepository(dataSource);
     const assetLockRepository = new AssetLockRepository(dataSource);
+    const auditWriter = new AuditWriter(
+      dataSource.getRepository(AuditRecord),
+      dataSource.getRepository(FailureRecord),
+    );
     mintWorker = new MintWorker(
       dataSource,
       operationRepository,
@@ -172,6 +181,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
       metadataService,
       submission,
       appConfig,
+      auditWriter,
     );
 
     confirmationService = new ConfirmationService(dataSource, rpc, appConfig);

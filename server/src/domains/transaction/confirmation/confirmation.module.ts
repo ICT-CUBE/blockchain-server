@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { AuditModule } from '../../audit/audit.module';
 import { NotificationPersistenceModule } from '../../notification/persistence/notification-persistence.module';
 import { OperationPersistenceModule } from '../../operation/persistence/operation-persistence.module';
 import { OperationFinalizer } from '../../operation/finalizer/operation-finalizer.service';
@@ -17,6 +18,7 @@ import { ReconciliationScheduler } from './reconciliation.scheduler';
     OperationPersistenceModule,
     RpcModule,
     NotificationPersistenceModule,
+    AuditModule,
   ],
   providers: [ConfirmationService, OperationFinalizer, ReconciliationScheduler],
   exports: [ConfirmationService, OperationFinalizer],

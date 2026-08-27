@@ -5,6 +5,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../../../shared/config/app-config.service';
 import { buildCanonicalString, computeHmacSignatureHex } from '../../../shared/auth/hmac/canonical-request';
 import { OperationStatus } from '../../../shared/domain/operation-status.enum';
+import { AuditWriter } from '../../audit/application/audit-writer';
+import { FailureCode } from '../../audit/persistence/failure-record.entity';
 import { OperationRepository } from '../../operation/persistence/operation.repository';
 import {
   NotificationDelivery,
@@ -33,6 +35,7 @@ export class NotificationDeliveryService {
     private readonly outbox: NotificationOutboxRepository,
     private readonly operationRepository: OperationRepository,
     private readonly appConfig: AppConfigService,
+    private readonly auditWriter: AuditWriter,
   ) {}
 
   async attemptDelivery(delivery: NotificationDelivery): Promise<void> {
@@ -71,6 +74,18 @@ export class NotificationDeliveryService {
       this.logger.warn(
         `Notification ${delivery.notificationId} exhausted auto-retry (or hit a permanent failure): ${errorMessage ?? status}`,
       );
+      await this.auditWriter
+        .writeFailure({
+          code: FailureCode.WEBHOOK_FAILED,
+          operationId: delivery.operationId,
+          notificationId: delivery.notificationId,
+          details: { status, errorMessage, attemptCount: nextAttemptCount },
+        })
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `Failure-record write failed for notification ${delivery.notificationId}: ${(error as Error).message}`,
+          );
+        });
       return;
     }
 

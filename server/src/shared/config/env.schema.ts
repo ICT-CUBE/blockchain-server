@@ -134,6 +134,23 @@ const baseEnvSchema = z.object({
   PINATA_JWT: z.string().min(1).optional(),
   NFT_STORAGE_TOKEN: z.string().min(1).optional(),
   METADATA_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+
+  /** TASK-14: structured logging level. */
+  LOG_LEVEL: z.enum(['debug', 'log', 'warn', 'error']).default('log'),
+  /** How long an Operation may sit SUBMITTED/PENDING/UNKNOWN before reconciliation records a
+   * LONG_PENDING failure for it (once per still-unresolved occurrence, not every poll tick). */
+  LONG_PENDING_THRESHOLD_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30 * 60 * 1000),
+  /** A key pair distinct from HMAC_INBOUND_* — TASK-14 §5: "조회 API는 HMAC 운영 key scope를 분리" —
+   * so the audit/failure operator query endpoints can never be reached with the same key Backend
+   * uses to create Operations. Same rotation shape as HMAC_INBOUND_*. */
+  HMAC_OPERATOR_KEY_ID: z.string().min(1, 'HMAC_OPERATOR_KEY_ID is required'),
+  HMAC_OPERATOR_KEY_SECRET: minLength32Base64UrlSecret,
+  HMAC_OPERATOR_PREVIOUS_KEY_ID: z.string().min(1).optional(),
+  HMAC_OPERATOR_PREVIOUS_KEY_SECRET: minLength32Base64UrlSecret.optional(),
 });
 
 /** Local-only Hardhat networks whose signer/RPC config may fall back to well-known dev defaults —
@@ -180,6 +197,15 @@ export const envSchema = baseEnvSchema
   .refine((env) => env.METADATA_PROVIDER !== 'real' || Boolean(env.NFT_STORAGE_TOKEN), {
     message: 'NFT_STORAGE_TOKEN is required when METADATA_PROVIDER=real',
     path: ['NFT_STORAGE_TOKEN'],
-  });
+  })
+  .refine(
+    (env) => Boolean(env.HMAC_OPERATOR_PREVIOUS_KEY_ID) === Boolean(env.HMAC_OPERATOR_PREVIOUS_KEY_SECRET),
+    {
+      message:
+        'HMAC_OPERATOR_PREVIOUS_KEY_ID and HMAC_OPERATOR_PREVIOUS_KEY_SECRET must be set together (a rotation ' +
+        'key needs both an id and a secret) or not at all',
+      path: ['HMAC_OPERATOR_PREVIOUS_KEY_SECRET'],
+    },
+  );
 
 export type Env = z.infer<typeof envSchema>;

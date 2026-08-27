@@ -23,6 +23,9 @@ import { OperationFinalizer } from '../../src/domains/operation/finalizer/operat
 import { OperationRepository } from '../../src/domains/operation/persistence/operation.repository';
 import { FakeWeb3AuthAdapter } from '../../src/domains/wallet/providers/fake-web3auth.adapter';
 import { WalletService } from '../../src/domains/wallet/application/wallet.service';
+import { AuditWriter } from '../../src/domains/audit/application/audit-writer';
+import { AuditRecord } from '../../src/domains/audit/persistence/audit-record.entity';
+import { FailureRecord } from '../../src/domains/audit/persistence/failure-record.entity';
 import { TransferApplication } from '../../src/domains/nft/transfer/transfer.application';
 import { TransferWorker } from '../../src/domains/nft/transfer/transfer.worker';
 import { createTestDataSource } from './test-data-source';
@@ -42,6 +45,8 @@ function setEnv(): void {
     process.env.DATABASE_URL ?? 'mysql://cube_nft:cube_nft_test_pw@127.0.0.1:3307/cube_nft_test';
   process.env.HMAC_INBOUND_KEY_ID = 'backend-v1';
   process.env.HMAC_INBOUND_KEY_SECRET = Buffer.alloc(32, 1).toString('base64url');
+  process.env.HMAC_OPERATOR_KEY_ID = 'operator-v1';
+  process.env.HMAC_OPERATOR_KEY_SECRET = Buffer.alloc(32, 101).toString('base64url');
   process.env.APPROVAL_JWT_SECRET = Buffer.alloc(32, 2).toString('base64url');
   process.env.APPROVAL_JWT_ISSUER = 'arzone-backend';
   process.env.APPROVAL_JWT_AUDIENCE = 'arzone-blockchain-server';
@@ -175,6 +180,10 @@ describe('TASK-08 transfer flow end-to-end (integration, real local chain)', () 
     submission = new TransactionSubmissionService(dataSource, nonceCoordinator, rpc, systemSigner, appConfig);
     operationRepository = new OperationRepository(dataSource);
     assetLockRepository = new AssetLockRepository(dataSource);
+    const auditWriter = new AuditWriter(
+      dataSource.getRepository(AuditRecord),
+      dataSource.getRepository(FailureRecord),
+    );
     transferWorker = new TransferWorker(
       dataSource,
       operationRepository,
@@ -183,6 +192,7 @@ describe('TASK-08 transfer flow end-to-end (integration, real local chain)', () 
       walletService,
       submission,
       appConfig,
+      auditWriter,
     );
 
     confirmationService = new ConfirmationService(dataSource, rpc, appConfig);

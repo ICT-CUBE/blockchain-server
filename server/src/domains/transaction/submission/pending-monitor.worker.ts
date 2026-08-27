@@ -6,6 +6,8 @@ import { AppConfigService } from '../../../shared/config/app-config.service';
 import { OperationStatus } from '../../../shared/domain/operation-status.enum';
 import { TransactionAttemptStatus } from '../../../shared/domain/transaction-attempt-status.enum';
 import { IntervalWorker } from '../../../shared/scheduling/interval-worker';
+import { AuditWriter } from '../../audit/application/audit-writer';
+import { FailureCode } from '../../audit/persistence/failure-record.entity';
 import { OperationRepository } from '../../operation/persistence/operation.repository';
 import { decryptRawTransaction } from '../encryption/raw-transaction-cipher';
 import { TransactionAttempt } from '../persistence/transaction-attempt.entity';
@@ -32,6 +34,7 @@ export class PendingMonitorWorker extends IntervalWorker {
     private readonly systemSigner: SystemSignerService,
     private readonly operationRepository: OperationRepository,
     private readonly appConfig: AppConfigService,
+    private readonly auditWriter: AuditWriter,
   ) {
     super();
   }
@@ -112,7 +115,19 @@ export class PendingMonitorWorker extends IntervalWorker {
     } catch {
       // Already moved by a concurrent finalizer (e.g. confirmation found a receipt in the
       // meantime) — nothing to do.
+      return;
     }
+    await this.auditWriter
+      .writeFailure({
+        code: FailureCode.REPEATED_FAILURE,
+        operationId,
+        details: { reason: 'RBF_LIMIT_EXCEEDED', maxAttempts: this.appConfig.submission.rbfMaxAttempts },
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `Failure-record write failed for operation ${operationId}: ${(error as Error).message}`,
+        );
+      });
   }
 
   private async replaceWithHigherFee(previous: TransactionAttempt): Promise<void> {

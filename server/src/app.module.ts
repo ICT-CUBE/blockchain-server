@@ -1,6 +1,7 @@
 import { Module, type MiddlewareConsumer, type NestModule } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
+import { AuditModule } from './domains/audit/audit.module';
 import { ExternalConsentChallengeModule } from './domains/nft/external-consent-challenge/external-consent-challenge.module';
 import { ExternalResaleModule } from './domains/nft/external-resale/external-resale.module';
 import { MintModule } from './domains/nft/mint/mint.module';
@@ -24,6 +25,7 @@ import { RequestIdMiddleware } from './shared/http/request-id.middleware';
     ConfigModule,
     DatabaseModule,
     HealthModule,
+    AuditModule,
     TransactionSubmissionModule,
     ConfirmationModule,
     MintModule,

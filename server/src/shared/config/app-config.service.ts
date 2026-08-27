@@ -64,4 +64,16 @@ export class AppConfigService {
   get metadata(): AppConfig['metadata'] {
     return this.config.metadata;
   }
+
+  get logging(): AppConfig['logging'] {
+    return this.config.logging;
+  }
+
+  get audit(): AppConfig['audit'] {
+    return this.config.audit;
+  }
+
+  get hmacOperator(): AppConfig['hmacOperator'] {
+    return this.config.hmacOperator;
+  }
 }

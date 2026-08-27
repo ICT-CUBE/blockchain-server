@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { AuditModule } from '../audit/audit.module';
 import { OperationPersistenceModule } from '../operation/persistence/operation-persistence.module';
 import { NonceCoordinator } from './nonce/nonce-coordinator.service';
 import { TransactionPersistenceModule } from './persistence/transaction-persistence.module';
@@ -18,7 +19,7 @@ import { TransactionSubmissionService } from './submission/transaction-submissio
  * `TRANSACTION_SUBMISSION_PORT` (what TASK-07+ domain workers depend on, never the concrete class).
  */
 @Module({
-  imports: [TransactionPersistenceModule, OperationPersistenceModule, RpcModule],
+  imports: [TransactionPersistenceModule, OperationPersistenceModule, RpcModule, AuditModule],
   providers: [
     SystemSignerService,
     NonceCoordinator,

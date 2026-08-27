@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { AuditModule } from '../audit/audit.module';
 import { OperationPersistenceModule } from '../operation/persistence/operation-persistence.module';
 import { NotificationDeliveryService } from './application/notification-delivery.service';
 import { NotificationDeliveryWorker } from './application/notification-delivery.worker';
@@ -10,7 +11,7 @@ import { NotificationPersistenceModule } from './persistence/notification-persis
  * CLI script (`scripts/redeliver-notification.ts`) can reuse the exact same delivery/outcome logic
  * the background worker uses, rather than duplicating it. */
 @Module({
-  imports: [NotificationPersistenceModule, OperationPersistenceModule],
+  imports: [NotificationPersistenceModule, OperationPersistenceModule, AuditModule],
   providers: [NotificationDeliveryService, NotificationDeliveryWorker],
   exports: [NotificationDeliveryService],
 })

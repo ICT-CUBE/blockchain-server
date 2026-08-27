@@ -34,6 +34,9 @@ import { OperationRepository } from '../../src/domains/operation/persistence/ope
 import { FakeWeb3AuthAdapter } from '../../src/domains/wallet/providers/fake-web3auth.adapter';
 import { WalletService } from '../../src/domains/wallet/application/wallet.service';
 import { WalletAccount } from '../../src/domains/wallet/persistence/wallet-account.entity';
+import { AuditWriter } from '../../src/domains/audit/application/audit-writer';
+import { AuditRecord } from '../../src/domains/audit/persistence/audit-record.entity';
+import { FailureRecord } from '../../src/domains/audit/persistence/failure-record.entity';
 import { WithdrawalApplication } from '../../src/domains/nft/withdrawal/withdrawal.application';
 import { WithdrawalWorker } from '../../src/domains/nft/withdrawal/withdrawal.worker';
 import { ReentryApplication } from '../../src/domains/nft/reentry/reentry.application';
@@ -57,6 +60,8 @@ function setEnv(): void {
     process.env.DATABASE_URL ?? 'mysql://cube_nft:cube_nft_test_pw@127.0.0.1:3307/cube_nft_test';
   process.env.HMAC_INBOUND_KEY_ID = 'backend-v1';
   process.env.HMAC_INBOUND_KEY_SECRET = Buffer.alloc(32, 1).toString('base64url');
+  process.env.HMAC_OPERATOR_KEY_ID = 'operator-v1';
+  process.env.HMAC_OPERATOR_KEY_SECRET = Buffer.alloc(32, 101).toString('base64url');
   process.env.APPROVAL_JWT_SECRET = Buffer.alloc(32, 2).toString('base64url');
   process.env.APPROVAL_JWT_ISSUER = 'arzone-backend';
   process.env.APPROVAL_JWT_AUDIENCE = 'arzone-blockchain-server';
@@ -189,6 +194,11 @@ describe('TASK-09 external wallet lifecycle (integration, real local chain)', ()
     operationRepository = new OperationRepository(dataSource);
     assetLockRepository = new AssetLockRepository(dataSource);
 
+    const auditWriter = new AuditWriter(
+      dataSource.getRepository(AuditRecord),
+      dataSource.getRepository(FailureRecord),
+    );
+
     withdrawalApplication = new WithdrawalApplication(walletService, operationIntake, cubeNftReader);
     withdrawalWorker = new WithdrawalWorker(
       dataSource,
@@ -198,6 +208,7 @@ describe('TASK-09 external wallet lifecycle (integration, real local chain)', ()
       walletService,
       submission,
       appConfig,
+      auditWriter,
     );
 
     reentryApplication = new ReentryApplication(walletService, operationIntake, cubeNftReader, appConfig);
@@ -208,6 +219,7 @@ describe('TASK-09 external wallet lifecycle (integration, real local chain)', ()
       cubeNftReader,
       submission,
       appConfig,
+      auditWriter,
     );
 
     externalResaleApplication = new ExternalResaleApplication(
@@ -223,6 +235,7 @@ describe('TASK-09 external wallet lifecycle (integration, real local chain)', ()
       cubeNftReader,
       submission,
       appConfig,
+      auditWriter,
     );
 
     confirmationService = new ConfirmationService(dataSource, rpc, appConfig);

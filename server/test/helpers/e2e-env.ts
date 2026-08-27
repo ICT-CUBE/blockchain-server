@@ -4,6 +4,8 @@ export const FIXTURES_DIR = path.join(__dirname, '..', 'fixtures', 'deployments'
 
 export const HMAC_KEY_ID = 'backend-v1';
 export const HMAC_SECRET = Buffer.alloc(32, 1);
+export const HMAC_OPERATOR_KEY_ID = 'operator-v1';
+export const HMAC_OPERATOR_SECRET = Buffer.alloc(32, 101);
 export const APPROVAL_JWT_SECRET = Buffer.alloc(32, 2);
 export const APPROVAL_JWT_ISSUER = 'arzone-backend';
 export const APPROVAL_JWT_AUDIENCE = 'arzone-blockchain-server';
@@ -21,6 +23,8 @@ export function applyE2eTestEnv(): void {
   process.env.DATABASE_URL = process.env.DATABASE_URL ?? 'mysql://cube_nft:cube_nft@127.0.0.1:3306/cube_nft';
   process.env.HMAC_INBOUND_KEY_ID = HMAC_KEY_ID;
   process.env.HMAC_INBOUND_KEY_SECRET = HMAC_SECRET.toString('base64url');
+  process.env.HMAC_OPERATOR_KEY_ID = HMAC_OPERATOR_KEY_ID;
+  process.env.HMAC_OPERATOR_KEY_SECRET = HMAC_OPERATOR_SECRET.toString('base64url');
   process.env.APPROVAL_JWT_SECRET = APPROVAL_JWT_SECRET.toString('base64url');
   process.env.APPROVAL_JWT_ISSUER = APPROVAL_JWT_ISSUER;
   process.env.APPROVAL_JWT_AUDIENCE = APPROVAL_JWT_AUDIENCE;

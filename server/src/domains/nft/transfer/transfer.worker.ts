@@ -6,6 +6,8 @@ import { AppConfigService } from '../../../shared/config/app-config.service';
 import { OperationStatus } from '../../../shared/domain/operation-status.enum';
 import { OperationType } from '../../../shared/domain/operation-type.enum';
 import { IntervalWorker } from '../../../shared/scheduling/interval-worker';
+import { AuditWriter } from '../../audit/application/audit-writer';
+import { FailureCode } from '../../audit/persistence/failure-record.entity';
 import { Operation } from '../../operation/persistence/operation.entity';
 import { OperationRepository } from '../../operation/persistence/operation.repository';
 import { AssetLockRepository } from '../../transaction/persistence/asset-lock.repository';
@@ -44,6 +46,7 @@ export class TransferWorker extends IntervalWorker {
     private readonly walletService: WalletService,
     @Inject(TRANSACTION_SUBMISSION_PORT) private readonly submission: TransactionSubmissionPort,
     private readonly appConfig: AppConfigService,
+    private readonly auditWriter: AuditWriter,
   ) {
     super();
   }
@@ -85,7 +88,7 @@ export class TransferWorker extends IntervalWorker {
     }
 
     if (!actualOwner || getAddress(actualOwner) !== expectedFrom) {
-      await this.flagOwnerConflict(operation);
+      await this.flagOwnerConflict(operation, actualOwner);
       return;
     }
 
@@ -148,8 +151,19 @@ export class TransferWorker extends IntervalWorker {
 
   /** The current owner is neither the expected seller nor the expected buyer — a data-integrity
    * concern, not something to retry automatically. */
-  private async flagOwnerConflict(operation: Operation): Promise<void> {
+  private async flagOwnerConflict(operation: Operation, actualOwner: string | null): Promise<void> {
     await this.transitionQuietly(operation.id, OperationStatus.REVIEW_REQUIRED, 'OWNER_MISMATCH_AT_SUBMIT');
+    await this.auditWriter
+      .writeFailure({
+        code: FailureCode.OWNER_MISMATCH,
+        operationId: operation.id,
+        details: { expectedFrom: operation.fromAddress, expectedTo: operation.toAddress, actualOwner },
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `Failure-record write failed for operation ${operation.id}: ${(error as Error).message}`,
+        );
+      });
   }
 
   private async transitionQuietly(

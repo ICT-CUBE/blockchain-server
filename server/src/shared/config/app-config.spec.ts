@@ -20,6 +20,8 @@ function baseEnv(overrides: Partial<NodeJS.ProcessEnv> = {}): NodeJS.ProcessEnv 
     DATABASE_URL: 'mysql://user:pass@127.0.0.1:3306/cube_nft_test',
     HMAC_INBOUND_KEY_ID: 'backend-v1',
     HMAC_INBOUND_KEY_SECRET: TEST_SECRET_A,
+    HMAC_OPERATOR_KEY_ID: 'operator-v1',
+    HMAC_OPERATOR_KEY_SECRET: Buffer.alloc(32, 5).toString('base64url'),
     APPROVAL_JWT_SECRET: TEST_SECRET_B,
     APPROVAL_JWT_ISSUER: 'arzone-backend',
     APPROVAL_JWT_AUDIENCE: 'arzone-blockchain-server',
@@ -54,6 +56,10 @@ describe('loadConfig', () => {
     expect(config.submission.signers.mintSignerPrivateKey).toBe(TEST_MINT_SIGNER_PRIVATE_KEY);
     expect(config.submission.rawTxEncryptionKey).toEqual(Buffer.from(TEST_RAW_TX_ENCRYPTION_KEY, 'base64'));
     expect(config.confirmation.blocksRequired).toBe(5);
+    expect(config.logging.level).toBe('log');
+    expect(config.audit.longPendingThresholdMs).toBe(30 * 60 * 1000);
+    expect(config.hmacOperator.current.keyId).toBe('operator-v1');
+    expect(config.hmacOperator.previous).toBeNull();
   });
 
   it('falls back to well-known Hardhat dev signers/RPC on a local network', () => {

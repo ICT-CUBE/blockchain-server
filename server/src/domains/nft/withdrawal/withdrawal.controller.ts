@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, Logger, Post, Req, UseGuards } from '@nestjs/common';
 
 import type { WithdrawalApprovalClaims } from '../../../shared/auth/approval-jwt/approval-jwt-claims';
 import {
@@ -10,6 +10,8 @@ import { HmacGuard } from '../../../shared/auth/hmac/hmac.guard';
 import { OperationType } from '../../../shared/domain/operation-type.enum';
 import type { OperationAcceptedResponse } from '../../../shared/http/operation-accepted.response';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
+import { AuditWriter } from '../../audit/application/audit-writer';
+import { AuditCategory } from '../../audit/persistence/audit-record.entity';
 import { WithdrawalApplication } from './withdrawal.application';
 import { withdrawalRequestBodySchema, type WithdrawalRequestBody } from './withdrawal-request.schema';
 
@@ -18,7 +20,12 @@ import { withdrawalRequestBodySchema, type WithdrawalRequestBody } from './withd
 @Controller('internal/v1/withdrawals')
 @UseGuards(HmacGuard, ApprovalJwtGuard)
 export class WithdrawalController {
-  constructor(private readonly withdrawalApplication: WithdrawalApplication) {}
+  private readonly logger = new Logger(WithdrawalController.name);
+
+  constructor(
+    private readonly withdrawalApplication: WithdrawalApplication,
+    private readonly auditWriter: AuditWriter,
+  ) {}
 
   @Post()
   @RequiresApproval(OperationType.WITHDRAWAL)
@@ -30,6 +37,21 @@ export class WithdrawalController {
     const approval = request.approval as WithdrawalApprovalClaims;
 
     const { operation } = await this.withdrawalApplication.accept(body, approval);
+
+    // TASK-14 §9: isolated from the accept transaction — see MintController for the rationale.
+    this.auditWriter
+      .writeAudit({
+        category: AuditCategory.BUSINESS_EVENT,
+        actor: approval.userId,
+        action: 'WITHDRAWAL_ACCEPTED',
+        target: String(operation.tokenId),
+        requestId: request.requestId,
+        operationId: operation.id,
+        details: { riskAcknowledgementVersion: approval.riskAcknowledgementVersion },
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(`Audit write failed for operation ${operation.id}: ${(error as Error).message}`);
+      });
 
     return {
       operationId: operation.id,

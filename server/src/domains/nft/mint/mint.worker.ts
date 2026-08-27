@@ -6,6 +6,8 @@ import { AppConfigService } from '../../../shared/config/app-config.service';
 import { OperationStatus } from '../../../shared/domain/operation-status.enum';
 import { OperationType } from '../../../shared/domain/operation-type.enum';
 import { IntervalWorker } from '../../../shared/scheduling/interval-worker';
+import { AuditWriter } from '../../audit/application/audit-writer';
+import { FailureCode } from '../../audit/persistence/failure-record.entity';
 import { MetadataService } from '../../metadata/application/metadata.service';
 import { Operation } from '../../operation/persistence/operation.entity';
 import { OperationRepository } from '../../operation/persistence/operation.repository';
@@ -42,6 +44,7 @@ export class MintWorker extends IntervalWorker {
     private readonly metadataService: MetadataService,
     @Inject(TRANSACTION_SUBMISSION_PORT) private readonly submission: TransactionSubmissionPort,
     private readonly appConfig: AppConfigService,
+    private readonly auditWriter: AuditWriter,
   ) {
     super();
   }
@@ -80,7 +83,7 @@ export class MintWorker extends IntervalWorker {
     }
 
     if (actualOwner && getAddress(actualOwner) !== expectedOwner) {
-      await this.flagOwnerConflict(operation);
+      await this.flagOwnerConflict(operation, actualOwner);
       return;
     }
 
@@ -123,8 +126,19 @@ export class MintWorker extends IntervalWorker {
 
   /** The owner changed between accept-time and now to something other than what this Operation
    * expects — a data-integrity concern, not something to retry automatically. */
-  private async flagOwnerConflict(operation: Operation): Promise<void> {
+  private async flagOwnerConflict(operation: Operation, actualOwner: string): Promise<void> {
     await this.transitionQuietly(operation.id, OperationStatus.REVIEW_REQUIRED, 'OWNER_MISMATCH_AT_SUBMIT');
+    await this.auditWriter
+      .writeFailure({
+        code: FailureCode.OWNER_MISMATCH,
+        operationId: operation.id,
+        details: { expectedOwner: operation.toAddress, actualOwner },
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `Failure-record write failed for operation ${operation.id}: ${(error as Error).message}`,
+        );
+      });
   }
 
   private async transitionQuietly(

@@ -1,5 +1,6 @@
 import type { AppConfigService } from '../../../shared/config/app-config.service';
 import { OperationStatus } from '../../../shared/domain/operation-status.enum';
+import type { AuditWriter } from '../../audit/application/audit-writer';
 import type { OperationRepository } from '../../operation/persistence/operation.repository';
 import {
   NotificationDeliveryStatus,
@@ -48,12 +49,17 @@ function makeService(params: { maxAutoRetries?: number } = {}) {
     },
   };
 
+  const auditWriter = {
+    writeFailure: jest.fn().mockResolvedValue(undefined),
+  };
+
   const service = new NotificationDeliveryService(
     outbox as unknown as NotificationOutboxRepository,
     operationRepository as unknown as OperationRepository,
     appConfig as unknown as AppConfigService,
+    auditWriter as unknown as AuditWriter,
   );
-  return { service, outbox, operationRepository };
+  return { service, outbox, operationRepository, auditWriter };
 }
 
 describe('NotificationDeliveryService', () => {

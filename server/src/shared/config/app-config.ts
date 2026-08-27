@@ -87,6 +87,20 @@ export interface MetadataConfig {
   readonly httpTimeoutMs: number;
 }
 
+export interface LoggingConfig {
+  readonly level: 'debug' | 'log' | 'warn' | 'error';
+}
+
+export interface AuditConfig {
+  readonly longPendingThresholdMs: number;
+}
+
+export interface HmacOperatorConfig {
+  readonly current: HmacKeyConfig;
+  /** Set only during a 90-day key-rotation window; both keys are accepted while it is set. */
+  readonly previous: HmacKeyConfig | null;
+}
+
 export interface NotificationConfig {
   readonly callbackUrl: string;
   readonly hmacOutbound: HmacOutboundConfig;
@@ -112,6 +126,9 @@ export interface AppConfig {
   readonly ownerConsent: OwnerConsentConfig;
   readonly notification: NotificationConfig;
   readonly metadata: MetadataConfig;
+  readonly logging: LoggingConfig;
+  readonly audit: AuditConfig;
+  readonly hmacOperator: HmacOperatorConfig;
 }
 
 /** Validates `env` against `envSchema` and loads the matching CubeNFT deployment artifact. Throws
@@ -128,6 +145,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ? {
           keyId: parsedEnv.HMAC_INBOUND_PREVIOUS_KEY_ID,
           secret: Buffer.from(parsedEnv.HMAC_INBOUND_PREVIOUS_KEY_SECRET, 'base64url'),
+        }
+      : null;
+
+  const previousOperatorHmacKey: HmacKeyConfig | null =
+    parsedEnv.HMAC_OPERATOR_PREVIOUS_KEY_ID && parsedEnv.HMAC_OPERATOR_PREVIOUS_KEY_SECRET
+      ? {
+          keyId: parsedEnv.HMAC_OPERATOR_PREVIOUS_KEY_ID,
+          secret: Buffer.from(parsedEnv.HMAC_OPERATOR_PREVIOUS_KEY_SECRET, 'base64url'),
         }
       : null;
 
@@ -208,6 +233,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       pinataJwt: parsedEnv.PINATA_JWT ?? null,
       nftStorageToken: parsedEnv.NFT_STORAGE_TOKEN ?? null,
       httpTimeoutMs: parsedEnv.METADATA_HTTP_TIMEOUT_MS,
+    }),
+    logging: Object.freeze({
+      level: parsedEnv.LOG_LEVEL,
+    }),
+    audit: Object.freeze({
+      longPendingThresholdMs: parsedEnv.LONG_PENDING_THRESHOLD_MS,
+    }),
+    hmacOperator: Object.freeze({
+      current: Object.freeze({
+        keyId: parsedEnv.HMAC_OPERATOR_KEY_ID,
+        secret: Buffer.from(parsedEnv.HMAC_OPERATOR_KEY_SECRET, 'base64url'),
+      }),
+      previous: previousOperatorHmacKey ? Object.freeze(previousOperatorHmacKey) : null,
     }),
   });
 }

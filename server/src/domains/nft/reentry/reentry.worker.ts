@@ -6,6 +6,8 @@ import { AppConfigService } from '../../../shared/config/app-config.service';
 import { OperationStatus } from '../../../shared/domain/operation-status.enum';
 import { OperationType } from '../../../shared/domain/operation-type.enum';
 import { IntervalWorker } from '../../../shared/scheduling/interval-worker';
+import { AuditWriter } from '../../audit/application/audit-writer';
+import { FailureCode } from '../../audit/persistence/failure-record.entity';
 import { Operation } from '../../operation/persistence/operation.entity';
 import { OperationRepository } from '../../operation/persistence/operation.repository';
 import { AssetLockRepository } from '../../transaction/persistence/asset-lock.repository';
@@ -51,6 +53,7 @@ export class ReentryWorker extends IntervalWorker {
     private readonly cubeNftReader: CubeNftReaderService,
     @Inject(TRANSACTION_SUBMISSION_PORT) private readonly submission: TransactionSubmissionPort,
     private readonly appConfig: AppConfigService,
+    private readonly auditWriter: AuditWriter,
   ) {
     super();
   }
@@ -100,7 +103,7 @@ export class ReentryWorker extends IntervalWorker {
     }
 
     if (!actualOwner || getAddress(actualOwner) !== expectedFrom) {
-      await this.transitionQuietly(operation.id, OperationStatus.REVIEW_REQUIRED, 'OWNER_MISMATCH_AT_SUBMIT');
+      await this.flagOwnerConflict(operation, actualOwner);
       return;
     }
 
@@ -145,6 +148,23 @@ export class ReentryWorker extends IntervalWorker {
     }
 
     await this.transitionQuietly(operation.id, OperationStatus.SUBMITTED, 'REENTRY_SUBMITTED');
+  }
+
+  /** The current owner is neither the expected sender nor the expected external recipient — a
+   * data-integrity concern, not something to retry automatically. */
+  private async flagOwnerConflict(operation: Operation, actualOwner: string | null): Promise<void> {
+    await this.transitionQuietly(operation.id, OperationStatus.REVIEW_REQUIRED, 'OWNER_MISMATCH_AT_SUBMIT');
+    await this.auditWriter
+      .writeFailure({
+        code: FailureCode.OWNER_MISMATCH,
+        operationId: operation.id,
+        details: { expectedFrom: operation.fromAddress, expectedTo: operation.toAddress, actualOwner },
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `Failure-record write failed for operation ${operation.id}: ${(error as Error).message}`,
+        );
+      });
   }
 
   private async transitionQuietly(

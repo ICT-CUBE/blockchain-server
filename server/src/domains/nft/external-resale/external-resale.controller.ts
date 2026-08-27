@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, Logger, Post, Req, UseGuards } from '@nestjs/common';
 
 import type { ExternalResaleApprovalClaims } from '../../../shared/auth/approval-jwt/approval-jwt-claims';
 import {
@@ -10,6 +10,8 @@ import { HmacGuard } from '../../../shared/auth/hmac/hmac.guard';
 import { OperationType } from '../../../shared/domain/operation-type.enum';
 import type { OperationAcceptedResponse } from '../../../shared/http/operation-accepted.response';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
+import { AuditWriter } from '../../audit/application/audit-writer';
+import { AuditCategory } from '../../audit/persistence/audit-record.entity';
 import { ExternalResaleApplication } from './external-resale.application';
 import {
   externalResaleRequestBodySchema,
@@ -20,7 +22,12 @@ import {
 @Controller('internal/v1/external-resales')
 @UseGuards(HmacGuard, ApprovalJwtGuard)
 export class ExternalResaleController {
-  constructor(private readonly externalResaleApplication: ExternalResaleApplication) {}
+  private readonly logger = new Logger(ExternalResaleController.name);
+
+  constructor(
+    private readonly externalResaleApplication: ExternalResaleApplication,
+    private readonly auditWriter: AuditWriter,
+  ) {}
 
   @Post()
   @RequiresApproval(OperationType.EXTERNAL_RESALE)
@@ -32,6 +39,21 @@ export class ExternalResaleController {
     const approval = request.approval as ExternalResaleApprovalClaims;
 
     const { operation } = await this.externalResaleApplication.accept(body, approval);
+
+    // TASK-14 §9: isolated from the accept transaction — see MintController for the rationale.
+    this.auditWriter
+      .writeAudit({
+        category: AuditCategory.BUSINESS_EVENT,
+        actor: approval.buyerUserId,
+        action: 'EXTERNAL_RESALE_ACCEPTED',
+        target: String(operation.tokenId),
+        requestId: request.requestId,
+        operationId: operation.id,
+        details: { tradeId: approval.tradeId },
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(`Audit write failed for operation ${operation.id}: ${(error as Error).message}`);
+      });
 
     return {
       operationId: operation.id,
