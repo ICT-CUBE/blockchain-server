@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Injectable } from '@nestjs/common';
-import { DataSource, QueryFailedError, type QueryDeepPartialEntity } from 'typeorm';
+import { DataSource, EntityManager, QueryFailedError, type QueryDeepPartialEntity } from 'typeorm';
 
 import { OperationStatus } from '../../../shared/domain/operation-status.enum';
 import { OperationType } from '../../../shared/domain/operation-type.enum';
@@ -69,65 +69,84 @@ export class OperationRepository {
   /** Atomically creates a new Operation + its initial REQUESTED history row, or returns the
    * existing Operation for the same `idempotencyKey`. Concurrent callers racing on the same new
    * `idempotencyKey` are resolved deterministically: exactly one insert wins, the other(s) fall
-   * back to reading the winner's row (FR-030/031). */
-  async createOrGet(input: CreateOrGetOperationInput): Promise<CreateOrGetOperationResult> {
+   * back to reading the winner's row (FR-030/031).
+   *
+   * Pass `manager` when this must commit atomically alongside other writes in the same logical
+   * request — e.g. TASK-06's `jti+idempotencyKey+유효 명령 hash` binding, which must land in the
+   * same transaction as the Operation it binds to. The caller that opens that outer transaction is
+   * responsible for using READ COMMITTED (see the isolation note below); omit `manager` to let this
+   * method open its own correctly-isolated transaction for a standalone call. */
+  async createOrGet(
+    input: CreateOrGetOperationInput,
+    manager?: EntityManager,
+  ): Promise<CreateOrGetOperationResult> {
+    if (manager) {
+      return this.createOrGetWithManager(manager, input);
+    }
     // READ COMMITTED, not the MySQL default REPEATABLE READ: the first SELECT below establishes
     // a consistent snapshot for the whole transaction under REPEATABLE READ, so a loser of the
     // insert race would re-read that *same stale* snapshot after its duplicate-key error and never
     // see the winner's now-committed row. READ COMMITTED re-reads fresh on every statement instead.
-    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
-      const existing = await manager.findOne(Operation, {
+    return this.dataSource.transaction('READ COMMITTED', (txManager) =>
+      this.createOrGetWithManager(txManager, input),
+    );
+  }
+
+  private async createOrGetWithManager(
+    manager: EntityManager,
+    input: CreateOrGetOperationInput,
+  ): Promise<CreateOrGetOperationResult> {
+    const existing = await manager.findOne(Operation, {
+      where: { idempotencyKey: input.idempotencyKey },
+    });
+    if (existing) {
+      if (existing.requestHash !== input.requestHash) {
+        throw new IdempotencyConflictError(input.idempotencyKey);
+      }
+      return { operation: existing, created: false };
+    }
+
+    const operation = manager.create(Operation, {
+      id: randomUUID(),
+      type: input.type,
+      status: OperationStatus.REQUESTED,
+      idempotencyKey: input.idempotencyKey,
+      requestHash: input.requestHash,
+      tokenId: input.tokenId,
+      fromAddress: input.fromAddress ?? null,
+      toAddress: input.toAddress ?? null,
+      metadata: input.metadata ?? null,
+    });
+
+    try {
+      // TypeORM's QueryDeepPartialEntity mapped type does not structurally accept a plain
+      // `Record<string, unknown>` for a json column; this cast is the documented workaround, not
+      // a loosening of this method's own type safety (`operation` is still a real `Operation`).
+      await manager.insert(Operation, operation as unknown as QueryDeepPartialEntity<Operation>);
+    } catch (error) {
+      if (!isDuplicateKeyError(error)) {
+        throw error;
+      }
+      // Lost the race on the idempotencyKey unique constraint: resolve exactly like the
+      // "already exists" branch above, against whichever row actually won.
+      const raced = await manager.findOneOrFail(Operation, {
         where: { idempotencyKey: input.idempotencyKey },
       });
-      if (existing) {
-        if (existing.requestHash !== input.requestHash) {
-          throw new IdempotencyConflictError(input.idempotencyKey);
-        }
-        return { operation: existing, created: false };
+      if (raced.requestHash !== input.requestHash) {
+        throw new IdempotencyConflictError(input.idempotencyKey);
       }
+      return { operation: raced, created: false };
+    }
 
-      const operation = manager.create(Operation, {
-        id: randomUUID(),
-        type: input.type,
-        status: OperationStatus.REQUESTED,
-        idempotencyKey: input.idempotencyKey,
-        requestHash: input.requestHash,
-        tokenId: input.tokenId,
-        fromAddress: input.fromAddress ?? null,
-        toAddress: input.toAddress ?? null,
-        metadata: input.metadata ?? null,
-      });
-
-      try {
-        // TypeORM's QueryDeepPartialEntity mapped type does not structurally accept a plain
-        // `Record<string, unknown>` for a json column; this cast is the documented workaround, not
-        // a loosening of this method's own type safety (`operation` is still a real `Operation`).
-        await manager.insert(Operation, operation as unknown as QueryDeepPartialEntity<Operation>);
-      } catch (error) {
-        if (!isDuplicateKeyError(error)) {
-          throw error;
-        }
-        // Lost the race on the idempotencyKey unique constraint: resolve exactly like the
-        // "already exists" branch above, against whichever row actually won.
-        const raced = await manager.findOneOrFail(Operation, {
-          where: { idempotencyKey: input.idempotencyKey },
-        });
-        if (raced.requestHash !== input.requestHash) {
-          throw new IdempotencyConflictError(input.idempotencyKey);
-        }
-        return { operation: raced, created: false };
-      }
-
-      await manager.insert(OperationStateHistory, {
-        id: randomUUID(),
-        operationId: operation.id,
-        fromStatus: null,
-        toStatus: OperationStatus.REQUESTED,
-        reason: 'created',
-      });
-
-      return { operation, created: true };
+    await manager.insert(OperationStateHistory, {
+      id: randomUUID(),
+      operationId: operation.id,
+      fromStatus: null,
+      toStatus: OperationStatus.REQUESTED,
+      reason: 'created',
     });
+
+    return { operation, created: true };
   }
 
   /** Compare-and-swap status transition: succeeds only if the row's current status still equals

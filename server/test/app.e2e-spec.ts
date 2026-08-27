@@ -1,33 +1,24 @@
 import type { Server } from 'node:http';
-import path from 'node:path';
 
-import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
+import { Test, type TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
-
-const FIXTURES_DIR = path.join(__dirname, 'fixtures', 'deployments');
+import { applyE2eTestEnv } from './helpers/e2e-env';
 
 describe('AppModule (e2e)', () => {
   let app: INestApplication;
   const originalEnv = { ...process.env };
 
   beforeAll(async () => {
-    process.env.NODE_ENV = 'test';
-    // Never actually bound: this suite calls app.init(), not app.listen().
-    process.env.PORT = '3000';
-    process.env.CUBE_NFT_NETWORK = 'localhost';
-    process.env.CUBE_NFT_DEPLOYMENTS_DIR = FIXTURES_DIR;
-    // AppModule does not import DatabaseModule (yet — that happens per-domain as each domain
-    // module is wired in), so this only needs to satisfy env validation, not a real connection.
-    process.env.DATABASE_URL = 'mysql://user:pass@127.0.0.1:3306/cube_nft_test';
+    applyE2eTestEnv();
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleFixture.createNestApplication({ rawBody: true });
     await app.init();
   });
 

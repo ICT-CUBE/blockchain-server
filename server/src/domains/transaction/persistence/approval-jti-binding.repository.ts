@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Injectable } from '@nestjs/common';
-import { DataSource, QueryFailedError } from 'typeorm';
+import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
 
 import { ApprovalJtiBinding } from './approval-jti-binding.entity';
 
@@ -45,10 +45,13 @@ export class ApprovalJtiBindingRepository {
 
   /** Atomically binds `jti` to `(idempotencyKey, validCommandHash, operationId)`. An exact resend
    * (same jti + same idempotencyKey + same hash) returns the original binding with `created:
-   * false`. Reuse of `jti` with different content throws `ApprovalJtiReplayError`. Intended to run
-   * in the same DB transaction as the Operation creation it accompanies (TASK-06 §5). */
-  async bindOrConflict(input: BindApprovalJtiInput): Promise<BindApprovalJtiResult> {
-    const repository = this.dataSource.getRepository(ApprovalJtiBinding);
+   * false`. Reuse of `jti` with different content throws `ApprovalJtiReplayError`.
+   *
+   * Pass `manager` to bind in the same DB transaction as the Operation this binding points at
+   * (TASK-06 §5: "jti+idempotencyKey+유효 명령 hash binding과 Operation 생성을 같은 DB transaction으로
+   * 처리"). Omit it only for a standalone call (e.g. a test exercising this repository alone). */
+  async bindOrConflict(input: BindApprovalJtiInput, manager?: EntityManager): Promise<BindApprovalJtiResult> {
+    const repository = (manager ?? this.dataSource).getRepository(ApprovalJtiBinding);
     const binding = repository.create({
       id: randomUUID(),
       jti: input.jti,

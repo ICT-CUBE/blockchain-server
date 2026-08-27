@@ -32,4 +32,12 @@ export class AppConfigService {
   get database(): AppConfig['database'] {
     return this.config.database;
   }
+
+  get hmacInbound(): AppConfig['hmacInbound'] {
+    return this.config.hmacInbound;
+  }
+
+  get approvalJwt(): AppConfig['approvalJwt'] {
+    return this.config.approvalJwt;
+  }
 }

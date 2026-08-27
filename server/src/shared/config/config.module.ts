@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { ConfigModule as NestConfigModule } from '@nestjs/config';
 
 import { AppConfigService } from './app-config.service';
@@ -13,6 +13,10 @@ import { AppConfigService } from './app-config.service';
 // remains a fallback for anyone running the compiled server from an unexpected directory.
 const REPO_ROOT_ENV_FILE = path.join(__dirname, '..', '..', '..', '..', '.env');
 
+// Global: AppConfigService is a fail-fast singleton every domain module needs (HMAC keys, JWT
+// config, DB, contract deployment). Making every consumer explicitly re-import ConfigModule would
+// just be ceremony around a config service, not a real module boundary worth enforcing.
+@Global()
 @Module({
   imports: [
     NestConfigModule.forRoot({

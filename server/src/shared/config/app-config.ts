@@ -7,20 +7,47 @@ export interface DatabaseConfig {
   readonly poolMax: number;
 }
 
+export interface HmacKeyConfig {
+  readonly keyId: string;
+  readonly secret: Buffer;
+}
+
+export interface HmacInboundConfig {
+  readonly current: HmacKeyConfig;
+  /** Set only during a 90-day key-rotation window; both keys are accepted while it is set. */
+  readonly previous: HmacKeyConfig | null;
+}
+
+export interface ApprovalJwtConfig {
+  readonly secret: Buffer;
+  readonly issuer: string;
+  readonly audience: string;
+}
+
 export interface AppConfig {
   readonly nodeEnv: Env['NODE_ENV'];
   readonly port: number;
   readonly network: string;
   readonly cubeNft: LoadedContract;
   readonly database: DatabaseConfig;
+  readonly hmacInbound: HmacInboundConfig;
+  readonly approvalJwt: ApprovalJwtConfig;
 }
 
 /** Validates `env` against `envSchema` and loads the matching CubeNFT deployment artifact. Throws
  * on any missing/invalid value so callers get fail-fast startup rather than a partially-configured
- * app. Never logs or returns `database.url` verbatim — it may embed a password. */
+ * app. Never logs or returns `database.url`, HMAC secrets, or the JWT secret verbatim. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsedEnv = envSchema.parse(env);
   const cubeNft = loadCubeNftContract(parsedEnv.CUBE_NFT_NETWORK, parsedEnv.CUBE_NFT_DEPLOYMENTS_DIR);
+
+  const previousHmacKey: HmacKeyConfig | null =
+    parsedEnv.HMAC_INBOUND_PREVIOUS_KEY_ID && parsedEnv.HMAC_INBOUND_PREVIOUS_KEY_SECRET
+      ? {
+          keyId: parsedEnv.HMAC_INBOUND_PREVIOUS_KEY_ID,
+          secret: Buffer.from(parsedEnv.HMAC_INBOUND_PREVIOUS_KEY_SECRET, 'base64url'),
+        }
+      : null;
 
   return Object.freeze({
     nodeEnv: parsedEnv.NODE_ENV,
@@ -31,6 +58,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       url: parsedEnv.DATABASE_URL,
       poolMin: parsedEnv.DATABASE_POOL_MIN,
       poolMax: parsedEnv.DATABASE_POOL_MAX,
+    }),
+    hmacInbound: Object.freeze({
+      current: Object.freeze({
+        keyId: parsedEnv.HMAC_INBOUND_KEY_ID,
+        secret: Buffer.from(parsedEnv.HMAC_INBOUND_KEY_SECRET, 'base64url'),
+      }),
+      previous: previousHmacKey ? Object.freeze(previousHmacKey) : null,
+    }),
+    approvalJwt: Object.freeze({
+      secret: Buffer.from(parsedEnv.APPROVAL_JWT_SECRET, 'base64url'),
+      issuer: parsedEnv.APPROVAL_JWT_ISSUER,
+      audience: parsedEnv.APPROVAL_JWT_AUDIENCE,
     }),
   });
 }
