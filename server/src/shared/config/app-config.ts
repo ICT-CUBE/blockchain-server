@@ -71,6 +71,10 @@ export interface ConfirmationConfig {
   readonly reconciliationBatchSize: number;
 }
 
+export interface MintConfig {
+  readonly metadataBaseUri: string;
+}
+
 export interface AppConfig {
   readonly nodeEnv: Env['NODE_ENV'];
   readonly port: number;
@@ -82,6 +86,7 @@ export interface AppConfig {
   readonly web3Auth: Web3AuthConfig;
   readonly submission: SubmissionConfig;
   readonly confirmation: ConfirmationConfig;
+  readonly mint: MintConfig;
 }
 
 /** Validates `env` against `envSchema` and loads the matching CubeNFT deployment artifact. Throws
@@ -156,6 +161,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       blocksRequired: parsedEnv.CONFIRMATION_BLOCKS_REQUIRED,
       reconciliationPollIntervalMs: parsedEnv.RECONCILIATION_POLL_INTERVAL_MS,
       reconciliationBatchSize: parsedEnv.RECONCILIATION_BATCH_SIZE,
+    }),
+    mint: Object.freeze({
+      metadataBaseUri: parsedEnv.MINT_METADATA_BASE_URI,
     }),
   });
 }

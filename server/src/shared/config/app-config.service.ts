@@ -52,4 +52,8 @@ export class AppConfigService {
   get confirmation(): AppConfig['confirmation'] {
     return this.config.confirmation;
   }
+
+  get mint(): AppConfig['mint'] {
+    return this.config.mint;
+  }
 }

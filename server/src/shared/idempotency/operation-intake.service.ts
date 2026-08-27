@@ -10,6 +10,10 @@ import {
   ApprovalJtiBindingRepository,
   ApprovalJtiReplayError,
 } from '../../domains/transaction/persistence/approval-jti-binding.repository';
+import {
+  AssetLockConflictError,
+  AssetLockRepository,
+} from '../../domains/transaction/persistence/asset-lock.repository';
 import type { Operation } from '../../domains/operation/persistence/operation.entity';
 import { ApiError } from '../http/api-error';
 
@@ -37,12 +41,19 @@ export class OperationIntakeService {
     private readonly dataSource: DataSource,
     private readonly operationRepository: OperationRepository,
     private readonly approvalJtiBindingRepository: ApprovalJtiBindingRepository,
+    private readonly assetLockRepository: AssetLockRepository,
   ) {}
 
   /** Throws `ApiError('IDEMPOTENCY_CONFLICT', ..., 409)` on FR-032's "same key, different
-   * content" case, and `ApiError('APPROVAL_JTI_REPLAY', ..., 409)` if `input.jti` was already
-   * bound to different content — callers do not need to know about the underlying repository
-   * error types. */
+   * content" case, `ApiError('APPROVAL_JTI_REPLAY', ..., 409)` if `input.jti` was already bound to
+   * different content, and `ApiError('ASSET_LOCK_CONFLICT', ..., 409)` if another Operation already
+   * holds the single allowed active lock on this tokenId (FR-019/020) — callers do not need to know
+   * about the underlying repository error types.
+   *
+   * The lock is only acquired when this call actually creates a new Operation: a retried request
+   * for an existing `idempotencyKey` returns the same Operation, which already acquired its lock
+   * the first time (or has since released it on completion — re-acquiring here would be wrong
+   * either way). */
   async acceptApprovedMutation(input: AcceptApprovedMutationInput): Promise<AcceptApprovedMutationResult> {
     try {
       return await this.dataSource.transaction('READ COMMITTED', async (manager) => {
@@ -56,6 +67,9 @@ export class OperationIntakeService {
           },
           manager,
         );
+        if (created) {
+          await this.assetLockRepository.acquire(input.operation.tokenId, operation.id, manager);
+        }
         return { operation, created };
       });
     } catch (error) {
@@ -70,6 +84,13 @@ export class OperationIntakeService {
         throw new ApiError(
           'APPROVAL_JTI_REPLAY',
           'Approval token was already used for a different request',
+          409,
+        );
+      }
+      if (error instanceof AssetLockConflictError) {
+        throw new ApiError(
+          'ASSET_LOCK_CONFLICT',
+          `tokenId ${error.tokenId} already has a conflicting operation in progress`,
           409,
         );
       }

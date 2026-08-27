@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Injectable } from '@nestjs/common';
-import { DataSource, QueryFailedError, type QueryDeepPartialEntity } from 'typeorm';
+import { DataSource, type EntityManager, QueryFailedError, type QueryDeepPartialEntity } from 'typeorm';
 
 import { AssetLock, AssetLockStatus } from './asset-lock.entity';
 
@@ -32,9 +32,11 @@ export class AssetLockRepository {
   constructor(private readonly dataSource: DataSource) {}
 
   /** Atomically acquires the lock for `tokenId` on behalf of `operationId`, or throws
-   * `AssetLockConflictError` if another Operation currently holds it. */
-  async acquire(tokenId: number, operationId: string): Promise<AssetLock> {
-    const repository = this.dataSource.getRepository(AssetLock);
+   * `AssetLockConflictError` if another Operation currently holds it. Pass `manager` to acquire
+   * atomically alongside the Operation row it belongs to (see `OperationIntakeService`) — otherwise
+   * this runs as its own standalone insert. */
+  async acquire(tokenId: number, operationId: string, manager?: EntityManager): Promise<AssetLock> {
+    const repository = (manager ?? this.dataSource).getRepository(AssetLock);
     const lock = repository.create({
       id: randomUUID(),
       tokenId,

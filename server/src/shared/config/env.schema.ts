@@ -107,6 +107,10 @@ const baseEnvSchema = z.object({
   CONFIRMATION_BLOCKS_REQUIRED: z.coerce.number().int().positive().default(5),
   RECONCILIATION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   RECONCILIATION_BATCH_SIZE: z.coerce.number().int().positive().default(20),
+
+  /** TASK-07: "고정 metadata URI" — a fixed, non-dynamic tokenURI convention until TASK-13 replaces
+   * this with real Pinata/NFT.Storage-backed metadata. Final segment is always `${tokenId}.json`. */
+  MINT_METADATA_BASE_URI: z.string().min(1).default('ipfs://pending-metadata/'),
 });
 
 /** Local-only Hardhat networks whose signer/RPC config may fall back to well-known dev defaults —

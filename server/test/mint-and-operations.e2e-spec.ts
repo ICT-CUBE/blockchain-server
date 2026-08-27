@@ -20,7 +20,11 @@ import { signHmacRequest } from './helpers/hmac-sign';
 import { signApprovalJwt } from './helpers/jwt-sign';
 
 const MINTS_PATH = '/internal/v1/mints';
-const RECIPIENT = '0x1111111111111111111111111111111111111111';
+const WALLETS_PATH = '/internal/v1/wallets';
+// Any well-formed address works as the "wrong purpose"/claim-mismatch tests' JWT `to` — those
+// requests are rejected before MintApplication ever resolves a wallet, so it never needs to be a
+// real provisioned wallet.
+const PLACEHOLDER_ADDRESS = '0x1111111111111111111111111111111111111111';
 
 interface MintBody {
   idempotencyKey: string;
@@ -29,14 +33,22 @@ interface MintBody {
   tokenId: number;
 }
 
-function buildMintClaims(body: MintBody, overrides: Record<string, unknown> = {}) {
+/** Asset locks now persist across test runs against the same (persistent, not-per-run-fresh) test
+ * DB unless something confirms/releases them (TASK-07/11) — nothing does in this HTTP-only e2e
+ * suite. Random tokenIds instead of hardcoded ones keep runs independent of each other, the same
+ * way the TASK-10/11 integration suites already do. */
+function randomTokenId(): number {
+  return Math.floor(Math.random() * 9000) + 1;
+}
+
+function buildMintClaims(body: MintBody, to: string, overrides: Record<string, unknown> = {}) {
   return {
     jti: randomUUID(),
     purpose: OperationType.MINT,
     tokenId: body.tokenId,
     userId: body.userId,
     cubeId: body.cubeId,
-    to: RECIPIENT,
+    to,
     ...overrides,
   };
 }
@@ -69,7 +81,10 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
     return req.send(bodyString);
   }
 
-  function hmacFor(bodyString: string, overrides: Partial<Parameters<typeof signHmacRequest>[0]> = {}) {
+  function hmacFor(
+    bodyString: string,
+    overrides: Partial<Parameters<typeof signHmacRequest>[0]> & { path?: string } = {},
+  ) {
     return signHmacRequest({
       method: 'POST',
       path: MINTS_PATH,
@@ -80,9 +95,27 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
     });
   }
 
-  function jwtFor(body: MintBody, claimOverrides: Record<string, unknown> = {}) {
+  /** Provisions (or looks up) the real custodial wallet for `userId` via the actual HTTP endpoint
+   * (TASK-05), so mint tests use a `to` claim that will genuinely match what `MintApplication`
+   * resolves — exercising the real TASK-07 wallet cross-check instead of a hardcoded address. */
+  async function walletAddressFor(userId: string): Promise<string> {
+    const bodyString = JSON.stringify({ userId });
+    const response = await request(server())
+      .post(WALLETS_PATH)
+      .set('Content-Type', 'application/json')
+      .set(hmacFor(bodyString, { path: WALLETS_PATH }))
+      .send(bodyString);
+    if (response.status !== 200) {
+      throw new Error(
+        `Failed to provision test wallet for ${userId}: ${response.status} ${JSON.stringify(response.body)}`,
+      );
+    }
+    return (response.body as { address: string }).address;
+  }
+
+  function jwtFor(body: MintBody, to: string, claimOverrides: Record<string, unknown> = {}) {
     return signApprovalJwt({
-      claims: buildMintClaims(body, claimOverrides),
+      claims: buildMintClaims(body, to, claimOverrides),
       secret: APPROVAL_JWT_SECRET,
       issuer: APPROVAL_JWT_ISSUER,
       audience: APPROVAL_JWT_AUDIENCE,
@@ -90,9 +123,10 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
   }
 
   it('accepts a fully valid request with 202 and REQUESTED status, then it is readable via GET', async () => {
-    const body: MintBody = { idempotencyKey: randomUUID(), userId: 'user-1', cubeId: 'cube-1', tokenId: 101 };
+    const tokenId = randomTokenId();
+    const body: MintBody = { idempotencyKey: randomUUID(), userId: 'user-1', cubeId: 'cube-1', tokenId };
     const bodyString = JSON.stringify(body);
-    const token = jwtFor(body);
+    const token = jwtFor(body, await walletAddressFor(body.userId));
 
     const response = await post(bodyString, hmacFor(bodyString), token);
 
@@ -100,7 +134,7 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
     expect(response.body).toMatchObject({
       status: OperationStatus.REQUESTED,
       type: OperationType.MINT,
-      tokenId: 101,
+      tokenId,
     });
     const operationId = (response.body as { operationId: string }).operationId;
 
@@ -108,7 +142,7 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
       .get(`/internal/v1/operations/${operationId}`)
       .set(hmacFor('', { method: 'GET', path: `/internal/v1/operations/${operationId}` }));
     expect(getResponse.status).toBe(200);
-    expect(getResponse.body).toMatchObject({ operationId, status: OperationStatus.REQUESTED, tokenId: 101 });
+    expect(getResponse.body).toMatchObject({ operationId, status: OperationStatus.REQUESTED, tokenId });
   });
 
   it('GET a non-existent operation id returns 404 with a stable error code', async () => {
@@ -122,7 +156,12 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
   });
 
   it('rejects a request missing HMAC headers', async () => {
-    const body: MintBody = { idempotencyKey: randomUUID(), userId: 'user-2', cubeId: 'cube-2', tokenId: 102 };
+    const body: MintBody = {
+      idempotencyKey: randomUUID(),
+      userId: 'user-2',
+      cubeId: 'cube-2',
+      tokenId: randomTokenId(),
+    };
     const bodyString = JSON.stringify(body);
     const response = await request(server())
       .post(MINTS_PATH)
@@ -133,7 +172,12 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
   });
 
   it('rejects a tampered signature', async () => {
-    const body: MintBody = { idempotencyKey: randomUUID(), userId: 'user-3', cubeId: 'cube-3', tokenId: 103 };
+    const body: MintBody = {
+      idempotencyKey: randomUUID(),
+      userId: 'user-3',
+      cubeId: 'cube-3',
+      tokenId: randomTokenId(),
+    };
     const bodyString = JSON.stringify(body);
     const headers = hmacFor(bodyString);
     const originalSignature = headers['X-ARZONE-Signature'] ?? '';
@@ -141,36 +185,51 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
       ? originalSignature.replace(/^f/, 'e')
       : `f${originalSignature.slice(1)}`;
 
-    const response = await post(bodyString, headers, jwtFor(body));
+    const response = await post(bodyString, headers, jwtFor(body, PLACEHOLDER_ADDRESS));
     expect(response.status).toBe(401);
     expect(response.body).toMatchObject({ code: 'HMAC_SIGNATURE_MISMATCH' });
   });
 
   it('rejects an expired timestamp', async () => {
-    const body: MintBody = { idempotencyKey: randomUUID(), userId: 'user-4', cubeId: 'cube-4', tokenId: 104 };
+    const body: MintBody = {
+      idempotencyKey: randomUUID(),
+      userId: 'user-4',
+      cubeId: 'cube-4',
+      tokenId: randomTokenId(),
+    };
     const bodyString = JSON.stringify(body);
     const headers = hmacFor(bodyString, { timestamp: Math.floor(Date.now() / 1000) - 400 });
 
-    const response = await post(bodyString, headers, jwtFor(body));
+    const response = await post(bodyString, headers, jwtFor(body, PLACEHOLDER_ADDRESS));
     expect(response.status).toBe(401);
     expect(response.body).toMatchObject({ code: 'HMAC_TIMESTAMP_OUT_OF_RANGE' });
   });
 
   it('rejects a timestamp too far in the future', async () => {
-    const body: MintBody = { idempotencyKey: randomUUID(), userId: 'user-5', cubeId: 'cube-5', tokenId: 105 };
+    const body: MintBody = {
+      idempotencyKey: randomUUID(),
+      userId: 'user-5',
+      cubeId: 'cube-5',
+      tokenId: randomTokenId(),
+    };
     const bodyString = JSON.stringify(body);
     const headers = hmacFor(bodyString, { timestamp: Math.floor(Date.now() / 1000) + 400 });
 
-    const response = await post(bodyString, headers, jwtFor(body));
+    const response = await post(bodyString, headers, jwtFor(body, PLACEHOLDER_ADDRESS));
     expect(response.status).toBe(401);
     expect(response.body).toMatchObject({ code: 'HMAC_TIMESTAMP_OUT_OF_RANGE' });
   });
 
   it('rejects a replayed (nonce, timestamp) pair even for an identical request', async () => {
-    const body: MintBody = { idempotencyKey: randomUUID(), userId: 'user-6', cubeId: 'cube-6', tokenId: 106 };
+    const body: MintBody = {
+      idempotencyKey: randomUUID(),
+      userId: 'user-6',
+      cubeId: 'cube-6',
+      tokenId: randomTokenId(),
+    };
     const bodyString = JSON.stringify(body);
     const headers = hmacFor(bodyString);
-    const token = jwtFor(body);
+    const token = jwtFor(body, await walletAddressFor(body.userId));
 
     const first = await post(bodyString, headers, token);
     expect(first.status).toBe(202);
@@ -181,7 +240,12 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
   });
 
   it('rejects a missing approval token', async () => {
-    const body: MintBody = { idempotencyKey: randomUUID(), userId: 'user-7', cubeId: 'cube-7', tokenId: 107 };
+    const body: MintBody = {
+      idempotencyKey: randomUUID(),
+      userId: 'user-7',
+      cubeId: 'cube-7',
+      tokenId: randomTokenId(),
+    };
     const bodyString = JSON.stringify(body);
     const response = await post(bodyString, hmacFor(bodyString));
     expect(response.status).toBe(401);
@@ -189,7 +253,12 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
   });
 
   it('rejects an approval token issued for a different purpose', async () => {
-    const body: MintBody = { idempotencyKey: randomUUID(), userId: 'user-8', cubeId: 'cube-8', tokenId: 108 };
+    const body: MintBody = {
+      idempotencyKey: randomUUID(),
+      userId: 'user-8',
+      cubeId: 'cube-8',
+      tokenId: randomTokenId(),
+    };
     const bodyString = JSON.stringify(body);
     const wrongPurposeToken = signApprovalJwt({
       claims: {
@@ -199,8 +268,8 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
         tradeId: 'trade-1',
         sellerUserId: 'seller',
         buyerUserId: 'buyer',
-        from: RECIPIENT,
-        to: RECIPIENT,
+        from: PLACEHOLDER_ADDRESS,
+        to: PLACEHOLDER_ADDRESS,
       },
       secret: APPROVAL_JWT_SECRET,
       issuer: APPROVAL_JWT_ISSUER,
@@ -213,9 +282,14 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
   });
 
   it('rejects an approval token whose claims do not match the request body', async () => {
-    const body: MintBody = { idempotencyKey: randomUUID(), userId: 'user-9', cubeId: 'cube-9', tokenId: 109 };
+    const body: MintBody = {
+      idempotencyKey: randomUUID(),
+      userId: 'user-9',
+      cubeId: 'cube-9',
+      tokenId: randomTokenId(),
+    };
     const bodyString = JSON.stringify(body);
-    const mismatchedToken = jwtFor(body, { tokenId: 999 });
+    const mismatchedToken = jwtFor(body, PLACEHOLDER_ADDRESS, { tokenId: 999 });
 
     const response = await post(bodyString, hmacFor(bodyString), mismatchedToken);
     expect(response.status).toBe(403);
@@ -227,14 +301,15 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
       idempotencyKey: randomUUID(),
       userId: 'user-10',
       cubeId: 'cube-10',
-      tokenId: 110,
+      tokenId: randomTokenId(),
     };
     const bodyString = JSON.stringify(body);
+    const walletAddress = await walletAddressFor(body.userId);
 
-    const first = await post(bodyString, hmacFor(bodyString), jwtFor(body));
+    const first = await post(bodyString, hmacFor(bodyString), jwtFor(body, walletAddress));
     expect(first.status).toBe(202);
 
-    const second = await post(bodyString, hmacFor(bodyString), jwtFor(body));
+    const second = await post(bodyString, hmacFor(bodyString), jwtFor(body, walletAddress));
     expect(second.status).toBe(202);
 
     expect((second.body as { operationId: string }).operationId).toBe(
@@ -244,14 +319,29 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
 
   it('reusing the same idempotencyKey with different content is a 409 conflict', async () => {
     const idempotencyKey = randomUUID();
-    const first: MintBody = { idempotencyKey, userId: 'user-11', cubeId: 'cube-11', tokenId: 111 };
+    const walletAddress = await walletAddressFor('user-11');
+    const first: MintBody = {
+      idempotencyKey,
+      userId: 'user-11',
+      cubeId: 'cube-11',
+      tokenId: randomTokenId(),
+    };
     const firstBodyString = JSON.stringify(first);
-    const firstResponse = await post(firstBodyString, hmacFor(firstBodyString), jwtFor(first));
+    const firstResponse = await post(firstBodyString, hmacFor(firstBodyString), jwtFor(first, walletAddress));
     expect(firstResponse.status).toBe(202);
 
-    const second: MintBody = { idempotencyKey, userId: 'user-11', cubeId: 'cube-11', tokenId: 112 };
+    const second: MintBody = {
+      idempotencyKey,
+      userId: 'user-11',
+      cubeId: 'cube-11',
+      tokenId: randomTokenId(),
+    };
     const secondBodyString = JSON.stringify(second);
-    const secondResponse = await post(secondBodyString, hmacFor(secondBodyString), jwtFor(second));
+    const secondResponse = await post(
+      secondBodyString,
+      hmacFor(secondBodyString),
+      jwtFor(second, walletAddress),
+    );
 
     expect(secondResponse.status).toBe(409);
     expect(secondResponse.body).toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
