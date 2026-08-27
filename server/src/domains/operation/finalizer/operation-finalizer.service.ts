@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DataSource, type QueryDeepPartialEntity } from 'typeorm';
 
 import { OperationStatus } from '../../../shared/domain/operation-status.enum';
+import { OperationType } from '../../../shared/domain/operation-type.enum';
 import { TransactionAttemptStatus } from '../../../shared/domain/transaction-attempt-status.enum';
 import { AssetLockRepository } from '../../transaction/persistence/asset-lock.repository';
 import { TransactionAttempt } from '../../transaction/persistence/transaction-attempt.entity';
@@ -37,17 +38,21 @@ export class OperationFinalizer {
 
   async apply(operation: Operation, result: ConfirmationResult): Promise<void> {
     switch (result.outcome) {
-      case 'CONFIRMED':
+      case 'CONFIRMED': {
         await this.markWinner(
           operation.id,
           result.winningAttemptId,
           result.blockNumber,
           result.confirmations,
         );
-        await this.transition(operation, OperationStatus.ONCHAIN_CONFIRMED, 'CHAIN_CONFIRMED', {
-          actualOwner: result.actualOwner,
-        });
+        const metadataPatch: Record<string, unknown> = { actualOwner: result.actualOwner };
+        const rightsState = this.rightsStateFor(operation.type);
+        if (rightsState) {
+          metadataPatch.rightsState = rightsState;
+        }
+        await this.transition(operation, OperationStatus.ONCHAIN_CONFIRMED, 'CHAIN_CONFIRMED', metadataPatch);
         break;
+      }
       case 'FAILED':
         await this.transition(operation, OperationStatus.FAILED, result.reason);
         break;
@@ -57,6 +62,21 @@ export class OperationFinalizer {
       case 'PENDING':
         // Nothing to do yet — the next reconciliation pass re-evaluates from scratch.
         break;
+    }
+  }
+
+  /** TASK-09 §5: "결과는 EXTERNAL_INACTIVE 또는 ELIGIBLE_FOR_ACTIVATION을 반환하며 Backend 권리를 직접
+   * 변경하지 않는다" — this only ever *reports* a derived state alongside the confirmed transfer;
+   * actually activating/deactivating the associated CUBE service rights remains Backend's job. */
+  private rightsStateFor(type: OperationType): 'EXTERNAL_INACTIVE' | 'ELIGIBLE_FOR_ACTIVATION' | null {
+    switch (type) {
+      case OperationType.WITHDRAWAL:
+        return 'EXTERNAL_INACTIVE';
+      case OperationType.REENTRY:
+      case OperationType.EXTERNAL_RESALE:
+        return 'ELIGIBLE_FOR_ACTIVATION';
+      default:
+        return null;
     }
   }
 
