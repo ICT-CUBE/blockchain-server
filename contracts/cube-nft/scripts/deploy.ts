@@ -25,7 +25,7 @@ const DEPLOYMENTS_DIR = path.resolve(PACKAGE_ROOT, "..", "deployments");
 
 const CONTRACT_NAME_TOKEN = "ARZONE CUBE NFT";
 const CONTRACT_SYMBOL = "CUBE";
-const LOCAL_NETWORK_NAMES = new Set(["hardhatMainnet", "hardhatOp"]);
+const LOCAL_NETWORK_NAMES = new Set(["hardhatMainnet", "hardhatOp", "localhost"]);
 
 interface DeploymentArtifact {
   chainId: number;

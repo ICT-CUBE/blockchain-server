@@ -24,4 +24,11 @@ export function applyE2eTestEnv(): void {
   process.env.APPROVAL_JWT_SECRET = APPROVAL_JWT_SECRET.toString('base64url');
   process.env.APPROVAL_JWT_ISSUER = APPROVAL_JWT_ISSUER;
   process.env.APPROVAL_JWT_AUDIENCE = APPROVAL_JWT_AUDIENCE;
+  // TASK-10/11: 'localhost' here is just this suite's fixture network name (see FIXTURES_DIR above),
+  // not a real chain — not in env.schema.ts's LOCAL_NETWORK_NAMES, so these must be set explicitly.
+  // No e2e spec actually submits a transaction, so the values only need to satisfy validation.
+  process.env.RAW_TX_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
+  process.env.TRANSACTION_RPC_URL_PRIMARY = 'http://127.0.0.1:8545';
+  process.env.MINT_SIGNER_PRIVATE_KEY = `0x${'4'.repeat(64)}`;
+  process.env.RELAYER_SIGNER_PRIVATE_KEY = `0x${'5'.repeat(64)}`;
 }

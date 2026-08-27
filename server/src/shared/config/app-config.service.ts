@@ -44,4 +44,12 @@ export class AppConfigService {
   get web3Auth(): AppConfig['web3Auth'] {
     return this.config.web3Auth;
   }
+
+  get submission(): AppConfig['submission'] {
+    return this.config.submission;
+  }
+
+  get confirmation(): AppConfig['confirmation'] {
+    return this.config.confirmation;
+  }
 }

@@ -67,9 +67,68 @@ const baseEnvSchema = z.object({
     .transform((value) => value.replace(/\\n/g, '\n'))
     .optional(),
   WEB3AUTH_JWT_SIGNING_KEY_ID: z.string().min(1).optional(),
+
+  /** TASK-10: chain RPC endpoints for transaction submission (separate from Web3Auth's own RPC
+   * target). Primary/backup failover, per NFR-012~014. Optional here — required only for non-local
+   * networks, defaulted for `hardhatMainnet`/`hardhatOp` in `loadConfig` (see there for why). */
+  TRANSACTION_RPC_URL_PRIMARY: z.string().min(1).optional(),
+  TRANSACTION_RPC_URL_BACKUP: z.string().min(1).optional(),
+  /** ARZONE-operated signer keys (not user custodial wallets): MINTER_ROLE and
+   * AUTHORIZED_TRANSFER_ROLE on `CubeNFT`. Defaulted to Hardhat's well-known dev mnemonic accounts
+   * #1/#2 on local networks only (matches `deploy.ts`'s local role fallback) — see `loadConfig`. */
+  MINT_SIGNER_PRIVATE_KEY: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{64}$/, 'must be a 32-byte hex private key (0x-prefixed)')
+    .optional(),
+  RELAYER_SIGNER_PRIVATE_KEY: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{64}$/, 'must be a 32-byte hex private key (0x-prefixed)')
+    .optional(),
+  /** AES-256-GCM key (base64, 32 raw bytes) encrypting `TransactionAttempt.rawTransactionCiphertext`
+   * at rest. Dev/test only — production uses KMS envelope encryption instead (TASK-10 §5), which is
+   * out of scope for this deployment target. */
+  RAW_TX_ENCRYPTION_KEY: z
+    .string()
+    .min(1, 'RAW_TX_ENCRYPTION_KEY is required')
+    .refine((value) => Buffer.from(value, 'base64').length === 32, {
+      message: 'must be a base64-encoded 32-byte AES-256-GCM key',
+    }),
+  SUBMISSION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+  /** How long a BROADCAST attempt may sit unconfirmed before the pending monitor fee-bumps it. */
+  RBF_THRESHOLD_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5 * 60 * 1000),
+  RBF_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  RBF_FEE_BUMP_PERCENT: z.coerce.number().int().positive().default(15),
+
+  /** TASK-11: confirmation and reconciliation. */
+  CONFIRMATION_BLOCKS_REQUIRED: z.coerce.number().int().positive().default(5),
+  RECONCILIATION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  RECONCILIATION_BATCH_SIZE: z.coerce.number().int().positive().default(20),
 });
 
+/** Local-only Hardhat networks whose signer/RPC config may fall back to well-known dev defaults —
+ * mirrors `contracts/cube-nft/scripts/deploy.ts`'s `LOCAL_NETWORK_NAMES`. */
+export const LOCAL_NETWORK_NAMES = new Set(['hardhatMainnet', 'hardhatOp']);
+
 export const envSchema = baseEnvSchema
+  .refine(
+    (env) => LOCAL_NETWORK_NAMES.has(env.CUBE_NFT_NETWORK) || Boolean(env.TRANSACTION_RPC_URL_PRIMARY),
+    {
+      message: 'TRANSACTION_RPC_URL_PRIMARY is required for non-local networks',
+      path: ['TRANSACTION_RPC_URL_PRIMARY'],
+    },
+  )
+  .refine((env) => LOCAL_NETWORK_NAMES.has(env.CUBE_NFT_NETWORK) || Boolean(env.MINT_SIGNER_PRIVATE_KEY), {
+    message: 'MINT_SIGNER_PRIVATE_KEY is required for non-local networks',
+    path: ['MINT_SIGNER_PRIVATE_KEY'],
+  })
+  .refine((env) => LOCAL_NETWORK_NAMES.has(env.CUBE_NFT_NETWORK) || Boolean(env.RELAYER_SIGNER_PRIVATE_KEY), {
+    message: 'RELAYER_SIGNER_PRIVATE_KEY is required for non-local networks',
+    path: ['RELAYER_SIGNER_PRIVATE_KEY'],
+  })
   .refine(
     (env) => Boolean(env.HMAC_INBOUND_PREVIOUS_KEY_ID) === Boolean(env.HMAC_INBOUND_PREVIOUS_KEY_SECRET),
     {

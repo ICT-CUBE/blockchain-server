@@ -81,6 +81,14 @@ export class TransactionAttempt {
   @Column({ name: 'receipt_status', type: 'tinyint', nullable: true })
   receiptStatus!: number | null;
 
+  /** `latestBlockNumber - receiptBlockNumber + 1` as of the last confirmation evaluation
+   * (TASK-11 §5). Recomputed on every `ConfirmationService.evaluate` pass, not just once. */
+  @Column({ name: 'confirmation_count', type: 'int', unsigned: true, nullable: true })
+  confirmationCount!: number | null;
+
+  @Column({ name: 'checked_at', type: 'timestamp', precision: 3, nullable: true })
+  checkedAt!: Date | null;
+
   @Column({ name: 'broadcast_at', type: 'timestamp', precision: 3, nullable: true })
   broadcastAt!: Date | null;
 

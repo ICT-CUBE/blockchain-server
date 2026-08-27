@@ -7,6 +7,7 @@ import { OperationStateHistory } from '../../domains/operation/persistence/opera
 import { Operation } from '../../domains/operation/persistence/operation.entity';
 import { ApprovalJtiBinding } from '../../domains/transaction/persistence/approval-jti-binding.entity';
 import { AssetLock } from '../../domains/transaction/persistence/asset-lock.entity';
+import { SignerLock } from '../../domains/transaction/persistence/signer-lock.entity';
 import { SignerNonceReservation } from '../../domains/transaction/persistence/signer-nonce-reservation.entity';
 import { TransactionAttempt } from '../../domains/transaction/persistence/transaction-attempt.entity';
 import { WalletAccount } from '../../domains/wallet/persistence/wallet-account.entity';
@@ -20,6 +21,7 @@ export const ALL_ENTITIES = [
   OperationStateHistory,
   TransactionAttempt,
   AssetLock,
+  SignerLock,
   SignerNonceReservation,
   ApprovalJtiBinding,
   NotificationDelivery,
