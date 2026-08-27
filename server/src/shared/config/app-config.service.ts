@@ -40,4 +40,8 @@ export class AppConfigService {
   get approvalJwt(): AppConfig['approvalJwt'] {
     return this.config.approvalJwt;
   }
+
+  get web3Auth(): AppConfig['web3Auth'] {
+    return this.config.web3Auth;
+  }
 }

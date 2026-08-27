@@ -24,6 +24,17 @@ export interface ApprovalJwtConfig {
   readonly audience: string;
 }
 
+export interface Web3AuthConfig {
+  readonly provider: 'fake' | 'web3auth';
+  readonly clientId: string;
+  readonly network: string;
+  readonly chainId: number;
+  readonly rpcTarget: string;
+  readonly authConnectionId: string | null;
+  readonly jwtSigningPrivateKey: string | null;
+  readonly jwtSigningKeyId: string | null;
+}
+
 export interface AppConfig {
   readonly nodeEnv: Env['NODE_ENV'];
   readonly port: number;
@@ -32,6 +43,7 @@ export interface AppConfig {
   readonly database: DatabaseConfig;
   readonly hmacInbound: HmacInboundConfig;
   readonly approvalJwt: ApprovalJwtConfig;
+  readonly web3Auth: Web3AuthConfig;
 }
 
 /** Validates `env` against `envSchema` and loads the matching CubeNFT deployment artifact. Throws
@@ -70,6 +82,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       secret: Buffer.from(parsedEnv.APPROVAL_JWT_SECRET, 'base64url'),
       issuer: parsedEnv.APPROVAL_JWT_ISSUER,
       audience: parsedEnv.APPROVAL_JWT_AUDIENCE,
+    }),
+    web3Auth: Object.freeze({
+      provider: parsedEnv.CUSTODIAL_WALLET_PROVIDER,
+      clientId: parsedEnv.WEB3AUTH_CLIENT_ID ?? '',
+      network: parsedEnv.WEB3AUTH_NETWORK,
+      chainId: parsedEnv.WEB3AUTH_CHAIN_ID,
+      rpcTarget: parsedEnv.WEB3AUTH_RPC_TARGET ?? '',
+      authConnectionId: parsedEnv.WEB3AUTH_AUTH_CONNECTION_ID ?? null,
+      jwtSigningPrivateKey: parsedEnv.WEB3AUTH_JWT_SIGNING_PRIVATE_KEY ?? null,
+      jwtSigningKeyId: parsedEnv.WEB3AUTH_JWT_SIGNING_KEY_ID ?? null,
     }),
   });
 }

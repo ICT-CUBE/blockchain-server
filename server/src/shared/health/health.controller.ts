@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 
+import { WalletService } from '../../domains/wallet/application/wallet.service';
 import { AppConfigService } from '../config/app-config.service';
 
 interface HealthResponse {
@@ -10,11 +11,18 @@ interface ReadinessResponse {
   status: 'ready';
   network: string;
   cubeNftProxyAddress: string;
+  /** False whenever the custodial wallet provider is the local fake adapter, not real Web3Auth
+   * custody (TASK-05 §5: "credential 누락 시 readiness가 실제 integration 미준비를 표시한다"). */
+  walletIntegrationReady: boolean;
+  walletProvider: string;
 }
 
 @Controller()
 export class HealthController {
-  constructor(private readonly config: AppConfigService) {}
+  constructor(
+    private readonly config: AppConfigService,
+    private readonly walletService: WalletService,
+  ) {}
 
   /** Liveness only: process is up. Does not touch DB/RPC (added in later tasks). */
   @Get('health')
@@ -29,6 +37,8 @@ export class HealthController {
       status: 'ready',
       network: this.config.network,
       cubeNftProxyAddress: this.config.cubeNft.deployment.proxyAddress,
+      walletIntegrationReady: this.walletService.isIntegrationReady,
+      walletProvider: this.walletService.providerName,
     };
   }
 }

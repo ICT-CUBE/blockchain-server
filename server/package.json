@@ -28,6 +28,8 @@
     "@nestjs/core": "11.2.1",
     "@nestjs/platform-express": "11.2.1",
     "@nestjs/typeorm": "11.0.3",
+    "@web3auth/no-modal": "11.4.0",
+    "@web3auth/node-sdk": "6.0.0",
     "dotenv": "17.4.2",
     "ethers": "6.17.0",
     "jsonwebtoken": "9.0.3",

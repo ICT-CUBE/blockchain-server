@@ -33,13 +33,17 @@ describe('AppModule (e2e)', () => {
     expect(response.body).toEqual({ status: 'ok' });
   });
 
-  it('GET /ready reports the resolved network and CubeNFT proxy address', async () => {
+  it('GET /ready reports the resolved network, CubeNFT proxy address, and wallet readiness', async () => {
     const response = await request(app.getHttpServer() as Server).get('/ready');
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       status: 'ready',
       network: 'localhost',
       cubeNftProxyAddress: '0x1111111111111111111111111111111111111111',
+      // No real Web3Auth credentials are configured, so this must stay honestly false — see
+      // TASK-05 §5: "credential 누락 시 readiness가 실제 integration 미준비를 표시한다".
+      walletIntegrationReady: false,
+      walletProvider: 'fake-web3auth',
     });
   });
 });

@@ -24,6 +24,8 @@
     "keccak@3.0.4": true,
     "secp256k1@4.0.5": true,
     "fsevents@2.3.3": true,
-    "unrs-resolver@1.12.2": true
+    "unrs-resolver@1.12.2": true,
+    "protobufjs@7.6.5": true,
+    "tiny-secp256k1@1.1.7": true
   }
 }

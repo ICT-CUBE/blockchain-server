@@ -43,16 +43,49 @@ const baseEnvSchema = z.object({
   APPROVAL_JWT_SECRET: minLength32Base64UrlSecret,
   APPROVAL_JWT_ISSUER: z.string().min(1, 'APPROVAL_JWT_ISSUER is required'),
   APPROVAL_JWT_AUDIENCE: z.string().min(1, 'APPROVAL_JWT_AUDIENCE is required'),
+
+  /** TASK-05: which `CustodialWalletPort` implementation `WalletModule` binds. "fake" (default) is
+   * the deterministic local adapter — always available, no external credentials. "web3auth" is the
+   * real adapter; see `Web3AuthAdapter` for exactly what else that then requires. */
+  CUSTODIAL_WALLET_PROVIDER: z.enum(['fake', 'web3auth']).default('fake'),
+  WEB3AUTH_CLIENT_ID: z.string().min(1).optional(),
+  WEB3AUTH_NETWORK: z.string().min(1).default('sapphire_devnet'),
+  /** Chain the Web3Auth client is constructed against (its constructor requires at least one).
+   * Defaults to Polygon Amoy's chainId. */
+  WEB3AUTH_CHAIN_ID: z.coerce.number().int().positive().default(80002),
+  WEB3AUTH_RPC_TARGET: z.string().min(1).optional(),
+  /** The Custom Auth Connection id from the Web3Auth dashboard, configured to trust this
+   * adapter's self-signed JWKS. Not required to construct the client — only to actually call
+   * `connect()` — so it stays optional here; `Web3AuthAdapter` throws a clear, specific error if a
+   * caller reaches it unset. */
+  WEB3AUTH_AUTH_CONNECTION_ID: z.string().min(1).optional(),
+  /** ES256 private key (PEM) this adapter self-signs "Custom JWT" idTokens with. `\n` written
+   * literally in a .env file is normalized to real newlines. */
+  WEB3AUTH_JWT_SIGNING_PRIVATE_KEY: z
+    .string()
+    .min(1)
+    .transform((value) => value.replace(/\\n/g, '\n'))
+    .optional(),
+  WEB3AUTH_JWT_SIGNING_KEY_ID: z.string().min(1).optional(),
 });
 
-export const envSchema = baseEnvSchema.refine(
-  (env) => Boolean(env.HMAC_INBOUND_PREVIOUS_KEY_ID) === Boolean(env.HMAC_INBOUND_PREVIOUS_KEY_SECRET),
-  {
-    message:
-      'HMAC_INBOUND_PREVIOUS_KEY_ID and HMAC_INBOUND_PREVIOUS_KEY_SECRET must be set together (a rotation key ' +
-      'needs both an id and a secret) or not at all',
-    path: ['HMAC_INBOUND_PREVIOUS_KEY_SECRET'],
-  },
-);
+export const envSchema = baseEnvSchema
+  .refine(
+    (env) => Boolean(env.HMAC_INBOUND_PREVIOUS_KEY_ID) === Boolean(env.HMAC_INBOUND_PREVIOUS_KEY_SECRET),
+    {
+      message:
+        'HMAC_INBOUND_PREVIOUS_KEY_ID and HMAC_INBOUND_PREVIOUS_KEY_SECRET must be set together (a rotation key ' +
+        'needs both an id and a secret) or not at all',
+      path: ['HMAC_INBOUND_PREVIOUS_KEY_SECRET'],
+    },
+  )
+  .refine((env) => env.CUSTODIAL_WALLET_PROVIDER !== 'web3auth' || Boolean(env.WEB3AUTH_CLIENT_ID), {
+    message: 'WEB3AUTH_CLIENT_ID is required when CUSTODIAL_WALLET_PROVIDER=web3auth',
+    path: ['WEB3AUTH_CLIENT_ID'],
+  })
+  .refine((env) => env.CUSTODIAL_WALLET_PROVIDER !== 'web3auth' || Boolean(env.WEB3AUTH_RPC_TARGET), {
+    message: 'WEB3AUTH_RPC_TARGET is required when CUSTODIAL_WALLET_PROVIDER=web3auth',
+    path: ['WEB3AUTH_RPC_TARGET'],
+  });
 
 export type Env = z.infer<typeof envSchema>;
