@@ -58,17 +58,23 @@ class FailingPreservationAdapter implements PreservationPort {
 
 /** Records every preserve() call and lets the test drive checkStatus() per requestId — so the
  * async lifecycle (queued → pinned/failed) can be asserted deterministically (검증 문제 1·2).
- * `gateNext` holds the *next* preserve() open until `releaseGate()` so late-completion fencing can
- * be exercised in-process (a real process kill would take the in-flight call with it — 검증 피드백). */
+ * `gateForCid(cid)` holds *that CID's* preserve() open until `releaseGate()` — keyed by CID, not
+ * call order, so `prepare()` submitting both CIDs concurrently cannot make the test flaky
+ * (검증 피드백). A real process kill would take the in-flight call with it, so fencing is
+ * exercised in-process instead. */
 class RecordingPreservationAdapter implements PreservationPort {
   readonly preserved: PreserveRequest[] = [];
   failNextPreserve = false;
-  gateNext = false;
   private seq = 0;
+  private gatedCid: string | null = null;
   private gate: { resolve: () => void; reject: (e: Error) => void } | null = null;
   private readonly states = new Map<string, PreservationPinState>();
 
   constructor(private readonly initialState: PreservationPinState = 'queued') {}
+
+  gateForCid(cid: string): void {
+    this.gatedCid = cid;
+  }
 
   async preserve(request: PreserveRequest): Promise<{ requestId: string }> {
     this.preserved.push(request);
@@ -78,8 +84,8 @@ class RecordingPreservationAdapter implements PreservationPort {
     }
     const requestId = `req-${request.cid}-${++this.seq}`;
     this.states.set(requestId, this.initialState);
-    if (this.gateNext) {
-      this.gateNext = false;
+    if (this.gatedCid === request.cid) {
+      this.gatedCid = null;
       await new Promise<void>((resolve, reject) => {
         this.gate = { resolve, reject };
       });
@@ -115,6 +121,13 @@ class RecordingPreservationAdapter implements PreservationPort {
   }
 }
 
+/** The CID `FakePinningAdapter` will produce for `imageBytes` — precomputed so a test can gate that
+ * exact CID's preserve() regardless of which of the two submissions the DB reaches first. */
+async function fakeCidFor(imageBytes: Buffer): Promise<string> {
+  const { cid } = await new FakePinningAdapter().pin(imageBytes);
+  return cid;
+}
+
 /** Move a dependency's `updated_at` far into the past so it counts as a stale `SUBMITTING` claim. */
 async function makeStale(dataSource: DataSource, tokenId: number, cid: string): Promise<void> {
   await dataSource.query(
@@ -123,17 +136,17 @@ async function makeStale(dataSource: DataSource, tokenId: number, cid: string): 
   );
 }
 
-/** Poll until the token's IMAGE dependency is in `SUBMITTING` (its `preserve()` was gated open). */
-async function waitForSubmitting(dataSource: DataSource, tokenId: number): Promise<void> {
+/** Poll until `cid`'s dependency for `tokenId` is in `SUBMITTING` (its `preserve()` was gated open). */
+async function waitForSubmitting(dataSource: DataSource, tokenId: number, cid: string): Promise<void> {
   const repo = dataSource.getRepository(MetadataDependency);
-  for (let i = 0; i < 100; i += 1) {
-    const image = await repo.findOne({ where: { tokenId, kind: MetadataDependencyKind.IMAGE } });
-    if (image?.preservationStatus === MetadataPreservationStatus.SUBMITTING) {
+  for (let i = 0; i < 200; i += 1) {
+    const dep = await repo.findOne({ where: { tokenId, cid } });
+    if (dep?.preservationStatus === MetadataPreservationStatus.SUBMITTING) {
       return;
     }
     await new Promise((r) => setTimeout(r, 10));
   }
-  throw new Error(`IMAGE dependency for token ${tokenId} never reached SUBMITTING`);
+  throw new Error(`dependency ${cid} for token ${tokenId} never reached SUBMITTING`);
 }
 
 /** Fails pin() for exactly the tokenIds in `failForTokenIds` — used to prove a single failed
@@ -385,19 +398,21 @@ describe('MetadataService (integration, real DB)', () => {
     const recording = new RecordingPreservationAdapter('queued');
     const service = makeService(new FakePinningAdapter(), recording);
     const tokenId = randomTokenId();
+    const imageBytes = Buffer.concat([PNG_MAGIC, Buffer.from(`image-${tokenId}`)]);
     const input = {
       tokenId,
       cubeNumber: `CUBE-${tokenId}`,
       publicGrade: 'A',
-      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`image-${tokenId}`)]).toString('base64'),
+      imageBase64: imageBytes.toString('base64'),
       benefitReferenceId: `benefit-${tokenId}`,
     };
 
     // Simulate a crash mid-submit: the image's preserve() hangs and never returns.
-    recording.gateNext = true;
+    const imageCid = await fakeCidFor(imageBytes);
+    recording.gateForCid(imageCid);
     const preparing = service.prepare(input);
-    // metadata JSON submits fine; image stays SUBMITTING. Give the microtasks a beat.
-    await waitForSubmitting(dataSource, tokenId);
+    // metadata JSON submits fine; image stays SUBMITTING regardless of submission ordering.
+    await waitForSubmitting(dataSource, tokenId, imageCid);
     const repo = dataSource.getRepository(MetadataDependency);
     const image = await repo.findOneOrFail({ where: { tokenId, kind: MetadataDependencyKind.IMAGE } });
     expect(image.preservationStatus).toBe(MetadataPreservationStatus.SUBMITTING);
@@ -426,17 +441,19 @@ describe('MetadataService (integration, real DB)', () => {
       const recording = new RecordingPreservationAdapter('queued');
       const service = makeService(new FakePinningAdapter(), recording);
       const tokenId = randomTokenId();
+      const imageBytes = Buffer.concat([PNG_MAGIC, Buffer.from(`img-${tokenId}-${lateMode}`)]);
       const input = {
         tokenId,
         cubeNumber: `CUBE-${tokenId}`,
         publicGrade: 'A',
-        imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`img-${tokenId}-${lateMode}`)]).toString('base64'),
+        imageBase64: imageBytes.toString('base64'),
         benefitReferenceId: `benefit-${tokenId}`,
       };
 
-      recording.gateNext = true; // hold submitter A (the image) open
+      const imageCid = await fakeCidFor(imageBytes);
+      recording.gateForCid(imageCid); // hold submitter A (the image) open
       const preparing = service.prepare(input);
-      await waitForSubmitting(dataSource, tokenId);
+      await waitForSubmitting(dataSource, tokenId, imageCid);
       const repo = dataSource.getRepository(MetadataDependency);
       const image = await repo.findOneOrFail({ where: { tokenId, kind: MetadataDependencyKind.IMAGE } });
 

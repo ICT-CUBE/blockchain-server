@@ -92,6 +92,19 @@ npm run deploy:amoy --workspace=contracts/cube-nft
 | `npm run smoke:docker` | `server/Dockerfile` 빌드 → 컨테이너 기동 → `/health`·`/ready` 확인. `.env`와 `SMOKE_DATABASE_URL`/`SMOKE_RPC_URL`/`SMOKE_NETWORK`(기본 host.docker.internal의 MySQL·Hardhat, `localhost` 네트워크) 사용 |
 | `npm run fill-nonce-gap --workspace=server -- --signer relayer [--dry-run]` | 운영자 승인 절차: signer nonce gap을 0-value self tx로 메우고 halt 해제 (D1 §10) |
 
+`test:contract`/`test:unit`/`test:integration`/`test:api`/`test:nonfunctional`는 뒤 인자를 실제
+runner로 전달한다(`npm run test:contract -- --grep <regex>`). 계획서 명령과의 차이:
+
+| 계획서 명령 | 현재 저장소 |
+|---|---|
+| `test:contract -- --grep "CubeNFT core"` | 그런 describe 없음 → `test:contract -- --grep "CubeNFT"` (또는 `mintTo`, `authorizedTransfer` 등 실제 `describe`명) |
+| `test:contract -- --grep "governance\|upgrade"` | `test:contract -- --grep "governance"` + `-- --grep "upgrade"` |
+| `test:integration -- --runInBand database` | DB-only 스펙은 `*-repository.integration-spec.ts` → `test:integration -- repository` |
+
+공백이 있는 grep 문자열은 npm 중첩 스크립트에서 quote가 깨진다 — 공백 없는 정규식이나
+`cd contracts/cube-nft && npx hardhat test --grep "…"` 직접 실행을 쓴다. 서버 포트는 `PORT`
+(기본 **3100** — 계획서 §3의 curl 예시와 일치).
+
 ### Remediation 요약 (docs/검증-종합-문제-원인-개선안.md)
 
 - **D1** 제출 순서 `estimateGas·fee → nonce 예약 → 서명·SIGNED 저장 → broadcast`; 예약 후 커밋 전 실패는 RELEASED로 반환되어 다음 제출이 재사용(gap 자동 충전); broadcast 오류 분류(`rpc-error.ts`)·exponential backoff·`BROADCAST_MAX_RETRIES` 상한·`nonce too high` 시 signer circuit breaker(`signer_locks.halted_reason`)와 `SIGNER_NONCE_GAP` 실패 기록.

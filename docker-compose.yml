@@ -25,7 +25,8 @@ services:
     env_file:
       - .env
     ports:
-      - '3000:3000'
+      # PORT defaults to 3100 (see .env.example — matches the 검증 계획서 curl examples).
+      - '3100:3100'
     depends_on:
       mysql:
         condition: service_healthy
