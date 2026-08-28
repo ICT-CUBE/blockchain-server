@@ -28,6 +28,7 @@ import { AuditRecord } from '../../src/domains/audit/persistence/audit-record.en
 import { FailureRecord } from '../../src/domains/audit/persistence/failure-record.entity';
 import { TransferApplication } from '../../src/domains/nft/transfer/transfer.application';
 import { TransferWorker } from '../../src/domains/nft/transfer/transfer.worker';
+import { unmintedTokenId } from '../helpers/unminted-token-id';
 import { createTestDataSource } from './test-data-source';
 
 const CONTRACTS_DEPLOYMENTS_DIR = path.join(__dirname, '..', '..', '..', 'contracts', 'deployments');
@@ -71,10 +72,6 @@ async function isNodeReachable(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function randomTokenId(): number {
-  return Math.floor(Math.random() * 9000) + 1;
 }
 
 function transferApproval(
@@ -125,7 +122,7 @@ describe('TASK-08 transfer flow end-to-end (integration, real local chain)', () 
   /** Mints a fresh token directly (bypassing TASK-07's HTTP flow, which isn't the thing under
    * test here) and confirms it, so each transfer test starts from a real, owned token. */
   async function mintAndConfirm(recipientAddress: string): Promise<number> {
-    const tokenId = randomTokenId();
+    const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
     const { operation } = await operationRepository.createOrGet({
       idempotencyKey: randomUUID(),
       type: OperationType.MINT,

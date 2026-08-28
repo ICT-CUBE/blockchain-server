@@ -44,6 +44,7 @@ import { ReentryApplication } from '../../src/domains/nft/reentry/reentry.applic
 import { ReentryWorker } from '../../src/domains/nft/reentry/reentry.worker';
 import { ExternalResaleApplication } from '../../src/domains/nft/external-resale/external-resale.application';
 import { ExternalResaleWorker } from '../../src/domains/nft/external-resale/external-resale.worker';
+import { unmintedTokenId } from '../helpers/unminted-token-id';
 import { createTestDataSource } from './test-data-source';
 
 const CONTRACTS_DEPLOYMENTS_DIR = path.join(__dirname, '..', '..', '..', 'contracts', 'deployments');
@@ -89,10 +90,6 @@ async function isNodeReachable(): Promise<boolean> {
   }
 }
 
-function randomTokenId(): number {
-  return Math.floor(Math.random() * 9000) + 1;
-}
-
 function baseApprovalFields(tokenId: number) {
   const now = Math.floor(Date.now() / 1000);
   return {
@@ -134,7 +131,7 @@ describe('TASK-09 external wallet lifecycle (integration, real local chain)', ()
   }
 
   async function mintAndConfirm(recipientAddress: string): Promise<number> {
-    const tokenId = randomTokenId();
+    const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
     const { operation } = await operationRepository.createOrGet({
       idempotencyKey: randomUUID(),
       type: OperationType.MINT,

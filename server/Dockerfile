@@ -11,7 +11,11 @@ RUN npm ci
 
 FROM deps AS build
 COPY . .
-RUN npm run build:contracts && npm run build:server
+# Bound the compiler heap so the build also succeeds on small Docker VMs (a 2 GB Docker Desktop VM
+# OOM-killed an unbounded `nest build` with exit 137); the two builds run as separate processes.
+ENV NODE_OPTIONS=--max-old-space-size=1280
+RUN npm run build:contracts
+RUN npm run build:server
 
 # Production-only dependency tree for the runtime image: no Hardhat/Mocha/Jest/ESLint toolchain
 # (which is where the audit's `high` finding lives) ships to production.

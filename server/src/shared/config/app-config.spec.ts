@@ -62,15 +62,25 @@ describe('loadConfig', () => {
     expect(config.hmacOperator.previous).toBeNull();
   });
 
-  it('falls back to well-known Hardhat dev signers/RPC on a local network', () => {
+  it('falls back to well-known Hardhat dev signers/RPC on a local network (localhost included, mirroring deploy.ts)', () => {
     const env = baseEnv({ CUBE_NFT_NETWORK: 'localhost' });
     delete env.TRANSACTION_RPC_URL_PRIMARY;
     delete env.MINT_SIGNER_PRIVATE_KEY;
     delete env.RELAYER_SIGNER_PRIVATE_KEY;
 
-    // 'localhost' (the fixture network name here) is not one of the real local Hardhat network
-    // names (hardhatMainnet/hardhatOp), so omitting these should still fail fast rather than
-    // silently falling back — proves the refine rules actually gate on the real network names.
+    const config = loadConfig(env);
+    expect(config.submission.rpc.primaryUrl).toBe('http://127.0.0.1:8545');
+    expect(config.submission.signers.mintSignerPrivateKey).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it('still fails fast on a non-local network when RPC/signer config is omitted', () => {
+    // 'remote-fixture' has a deployment artifact but is not a LOCAL_NETWORK_NAMES entry, so the
+    // refine rules must reject the missing values rather than silently fall back.
+    const env = baseEnv({ CUBE_NFT_NETWORK: 'remote-fixture' });
+    delete env.TRANSACTION_RPC_URL_PRIMARY;
+    delete env.MINT_SIGNER_PRIVATE_KEY;
+    delete env.RELAYER_SIGNER_PRIVATE_KEY;
+
     expect(() => loadConfig(env)).toThrow();
   });
 

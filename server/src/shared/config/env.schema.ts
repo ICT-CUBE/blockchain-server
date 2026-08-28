@@ -169,8 +169,10 @@ const baseEnvSchema = z.object({
 });
 
 /** Local-only Hardhat networks whose signer/RPC config may fall back to well-known dev defaults —
- * mirrors `contracts/cube-nft/scripts/deploy.ts`'s `LOCAL_NETWORK_NAMES`. */
-export const LOCAL_NETWORK_NAMES = new Set(['hardhatMainnet', 'hardhatOp']);
+ * mirrors `contracts/cube-nft/scripts/deploy.ts`'s `LOCAL_NETWORK_NAMES` exactly (including
+ * `localhost`, the separately-running `npx hardhat node` at 127.0.0.1:8545, which uses the same
+ * public dev mnemonic accounts as the in-process networks). */
+export const LOCAL_NETWORK_NAMES = new Set(['hardhatMainnet', 'hardhatOp', 'localhost']);
 
 export const envSchema = baseEnvSchema
   .refine(

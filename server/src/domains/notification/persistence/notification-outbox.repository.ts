@@ -57,24 +57,24 @@ export class NotificationOutboxRepository {
     lockSeconds = DEFAULT_CLAIM_LOCK_SECONDS,
   ): Promise<NotificationDelivery[]> {
     const claimToken = randomUUID();
-    const now = new Date();
-    const lockedUntil = new Date(now.getTime() + lockSeconds * 1000);
 
+    // Every time comparison here uses the DB's own clock (`NOW(3)`), never the application's
+    // `new Date()`: with several worker processes (or a DB on another host/VM) the two clocks drift
+    // by tens of milliseconds, which is enough for "expired according to one clock, not yet to the
+    // other" and hence a row that is claimable or not depending on who asks (검증 개선안 §7).
     await this.dataSource.query(
       `UPDATE outbox_notifications
-       SET claim_token = ?, locked_until = ?
+       SET claim_token = ?, locked_until = DATE_ADD(NOW(3), INTERVAL ? SECOND)
        WHERE status IN (?, ?)
-         AND next_attempt_at <= ?
-         AND (locked_until IS NULL OR locked_until < ?)
+         AND next_attempt_at <= NOW(3)
+         AND (locked_until IS NULL OR locked_until < NOW(3))
        ORDER BY next_attempt_at ASC
        LIMIT ?`,
       [
         claimToken,
-        lockedUntil,
+        lockSeconds,
         NotificationDeliveryStatus.PENDING,
         NotificationDeliveryStatus.RETRYING,
-        now,
-        now,
         limit,
       ],
     );

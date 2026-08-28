@@ -31,6 +31,7 @@ import { OperationFinalizer } from '../../src/domains/operation/finalizer/operat
 import { OperationRepository } from '../../src/domains/operation/persistence/operation.repository';
 import { FakeWeb3AuthAdapter } from '../../src/domains/wallet/providers/fake-web3auth.adapter';
 import { WalletService } from '../../src/domains/wallet/application/wallet.service';
+import { unmintedTokenId } from '../helpers/unminted-token-id';
 import { createTestDataSource } from './test-data-source';
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // 검증 §5: metadata images must be real image bytes
@@ -76,10 +77,6 @@ async function isNodeReachable(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function randomTokenId(): number {
-  return Math.floor(Math.random() * 9000) + 1;
 }
 
 function mintApproval(
@@ -210,7 +207,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
 
     const userId = `user-${randomUUID()}`;
     const cubeId = `cube-${randomUUID()}`;
-    const tokenId = randomTokenId();
+    const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
     await prepareMetadata(tokenId);
 
     const wallet = await walletService.getOrCreate(userId);
@@ -247,7 +244,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
     const ownerUserId = `user-${randomUUID()}`;
     const otherUserId = `user-${randomUUID()}`;
     const cubeId = `cube-${randomUUID()}`;
-    const tokenId = randomTokenId();
+    const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
     await prepareMetadata(tokenId);
 
     const ownerWallet = await walletService.getOrCreate(ownerUserId);
@@ -286,7 +283,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
 
     const userId = `user-${randomUUID()}`;
     const cubeId = `cube-${randomUUID()}`;
-    const tokenId = randomTokenId();
+    const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
     await prepareMetadata(tokenId);
     const wallet = await walletService.getOrCreate(userId);
 

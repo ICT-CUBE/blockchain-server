@@ -20,6 +20,7 @@ import { SystemSignerService } from '../../src/domains/transaction/signing/syste
 import { PendingMonitorWorker } from '../../src/domains/transaction/submission/pending-monitor.worker';
 import { SignedAttemptRecoveryWorker } from '../../src/domains/transaction/submission/signed-attempt-recovery.worker';
 import { TransactionSubmissionService } from '../../src/domains/transaction/submission/transaction-submission.service';
+import { unmintedTokenId } from '../helpers/unminted-token-id';
 import { createTestDataSource } from './test-data-source';
 
 /**
@@ -92,10 +93,6 @@ async function insertOperation(
   return operation.id;
 }
 
-function randomTokenId(): number {
-  return Math.floor(Math.random() * 9000) + 1;
-}
-
 describe('TASK-10 transaction submission (integration, real local chain)', () => {
   let dataSource: DataSource;
   let appConfig: AppConfigService;
@@ -152,7 +149,7 @@ describe('TASK-10 transaction submission (integration, real local chain)', () =>
   it('submits a mint transaction that lands on-chain with the reserved nonce', async () => {
     if (skip) return;
 
-    const tokenId = randomTokenId();
+    const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
     const recipient = Wallet.createRandom().address;
     const operationId = await insertOperation(operationRepository, tokenId, recipient);
     const data = mintInterface.encodeFunctionData('mintTo', [
@@ -195,7 +192,7 @@ describe('TASK-10 transaction submission (integration, real local chain)', () =>
 
     const submissions = await Promise.all(
       Array.from({ length: 5 }, async () => {
-        const tokenId = randomTokenId();
+        const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
         const recipient = Wallet.createRandom().address;
         const operationId = await insertOperation(operationRepository, tokenId, recipient);
         const data = mintInterface.encodeFunctionData('mintTo', [
@@ -239,7 +236,7 @@ describe('TASK-10 transaction submission (integration, real local chain)', () =>
   it('SignedAttemptRecoveryWorker re-broadcasts an attempt that never made it off SIGNED', async () => {
     if (skip) return;
 
-    const tokenId = randomTokenId();
+    const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
     const recipient = Wallet.createRandom().address;
     const operationId = await insertOperation(operationRepository, tokenId, recipient);
     const data = mintInterface.encodeFunctionData('mintTo', [
@@ -308,7 +305,7 @@ describe('TASK-10 transaction submission (integration, real local chain)', () =>
 
     await rpc.getReadProvider().send('evm_setAutomine', [false]);
     try {
-      const tokenId = randomTokenId();
+      const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
       const recipient = Wallet.createRandom().address;
       const operationId = await insertOperation(operationRepository, tokenId, recipient);
       await operationRepository.transition(

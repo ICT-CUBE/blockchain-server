@@ -27,6 +27,7 @@ import {
 } from '../../src/domains/notification/persistence/notification-delivery.entity';
 import { NotificationOutboxRepository } from '../../src/domains/notification/persistence/notification-outbox.repository';
 import { createMockReceiverServer } from '../../mock-receiver/server';
+import { unmintedTokenId } from '../helpers/unminted-token-id';
 import { createTestDataSource } from './test-data-source';
 
 const CONTRACTS_DEPLOYMENTS_DIR = path.join(__dirname, '..', '..', '..', 'contracts', 'deployments');
@@ -78,10 +79,6 @@ async function isNodeReachable(): Promise<boolean> {
   }
 }
 
-function randomTokenId(): number {
-  return Math.floor(Math.random() * 9000) + 1;
-}
-
 describe('TASK-12 notification delivery (integration, real local chain + real HTTP receiver)', () => {
   let dataSource: DataSource;
   let appConfig: AppConfigService;
@@ -109,7 +106,7 @@ describe('TASK-12 notification delivery (integration, real local chain + real HT
   }
 
   async function mintConfirmAndEnqueueNotification(): Promise<{ operationId: string; tokenId: number }> {
-    const tokenId = randomTokenId();
+    const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
     const recipient = Wallet.createRandom().address;
     const { operation } = await operationRepository.createOrGet({
       idempotencyKey: randomUUID(),

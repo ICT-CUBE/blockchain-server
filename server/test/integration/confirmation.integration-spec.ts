@@ -19,6 +19,7 @@ import { OperationRepository } from '../../src/domains/operation/persistence/ope
 import { AuditWriter } from '../../src/domains/audit/application/audit-writer';
 import { AuditRecord } from '../../src/domains/audit/persistence/audit-record.entity';
 import { FailureRecord } from '../../src/domains/audit/persistence/failure-record.entity';
+import { unmintedTokenId } from '../helpers/unminted-token-id';
 import { createTestDataSource } from './test-data-source';
 
 const CONTRACTS_DEPLOYMENTS_DIR = path.join(__dirname, '..', '..', '..', 'contracts', 'deployments');
@@ -62,10 +63,6 @@ async function isNodeReachable(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function randomTokenId(): number {
-  return Math.floor(Math.random() * 9000) + 1;
 }
 
 describe('TASK-11 confirmation & reconciliation (integration, real local chain)', () => {
@@ -133,7 +130,7 @@ describe('TASK-11 confirmation & reconciliation (integration, real local chain)'
   it('confirms a mint once it has 5 confirmations, verifies actual ownerOf, and releases the asset lock', async () => {
     if (skip) return;
 
-    const tokenId = randomTokenId();
+    const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
     const recipient = Wallet.createRandom().address;
     const { operation } = await operationRepository.createOrGet({
       idempotencyKey: randomUUID(),
@@ -203,7 +200,7 @@ describe('TASK-11 confirmation & reconciliation (integration, real local chain)'
   it('flags REVIEW_REQUIRED when the actual mint recipient does not match the Operation record', async () => {
     if (skip) return;
 
-    const tokenId = randomTokenId();
+    const tokenId = await unmintedTokenId(RPC_URL, appConfig.cubeNft.deployment.proxyAddress);
     const actualRecipient = Wallet.createRandom().address;
     const wronglyRecordedRecipient = Wallet.createRandom().address;
 
