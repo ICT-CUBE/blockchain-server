@@ -33,21 +33,25 @@ function randomTokenId(): number {
 
 /**
  * 검증 개선안 §4 / 계획서 T15 §4: every documented endpoint's real response is validated against
- * `docs/openapi.yaml`. This suite boots the whole HTTP stack but does not need a chain — it exercises
+ * the repo-root `openapi.yaml`. This suite boots the whole HTTP stack but does not need a chain — it exercises
  * the accept/lookup/error paths (the on-chain lifecycle is covered by the integration suites) and, for
  * the one endpoint that reads the chain (`GET /nfts/{tokenId}`), accepts either the documented 200 or
  * the documented 503 — both must validate.
  */
 describe('OpenAPI contract (e2e)', () => {
-  const available = existsSync(OPENAPI_PATH);
   let app: INestApplication;
   let validator: OpenApiValidator;
   const originalEnv = { ...process.env };
 
   beforeAll(async () => {
-    if (!available) {
-      console.warn(`Skipping OpenAPI contract suite: ${OPENAPI_PATH} not found`);
-      return;
+    // The spec is a versioned repo file (`code/openapi.yaml`). If it is ever missing this suite
+    // MUST fail loudly — a silent skip here is exactly what let 8 hollow "passing" tests hide a
+    // stale/misplaced spec (검증 피드백 2026-08-28).
+    if (!existsSync(OPENAPI_PATH)) {
+      throw new Error(
+        `OpenAPI contract suite cannot run: spec not found at ${OPENAPI_PATH}. ` +
+          'It is a versioned file — restore code/openapi.yaml.',
+      );
     }
     applyE2eTestEnv();
     validator = new OpenApiValidator();
@@ -57,9 +61,7 @@ describe('OpenAPI contract (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (available) {
-      await app.close();
-    }
+    await app?.close();
     process.env = originalEnv;
   });
 
@@ -110,7 +112,6 @@ describe('OpenAPI contract (e2e)', () => {
   }
 
   it('health / ready', async () => {
-    if (!available) return;
     const health = await request(server()).get('/health');
     validator.assertResponse('get', '/health', health.status, health.body);
     const ready = await request(server()).get('/ready');
@@ -118,7 +119,6 @@ describe('OpenAPI contract (e2e)', () => {
   });
 
   it('wallets: ensure, get, 404, 401', async () => {
-    if (!available) return;
     const userId = `contract-${randomUUID()}`;
     const body = { userId };
     validator.assertRequestBody('post', '/internal/v1/wallets', body);
@@ -147,7 +147,6 @@ describe('OpenAPI contract (e2e)', () => {
   });
 
   it('nfts: documented 200 or 503, and 400 for an out-of-range tokenId', async () => {
-    if (!available) return;
     const response = await request(server())
       .get('/internal/v1/nfts/421')
       .set(inbound('GET', '/internal/v1/nfts/421'));
@@ -162,7 +161,6 @@ describe('OpenAPI contract (e2e)', () => {
   });
 
   it('metadata: prepare (200), status (200), PII field rejected (400), non-image rejected (415)', async () => {
-    if (!available) return;
     const tokenId = randomTokenId();
     const body = {
       tokenId,
@@ -208,7 +206,6 @@ describe('OpenAPI contract (e2e)', () => {
   });
 
   it('mints + operations: 202 accepted, GET view, cancel, 404, 409', async () => {
-    if (!available) return;
     const tokenId = randomTokenId();
     const userId = `contract-mint-${randomUUID()}`;
     const walletBody = JSON.stringify({ userId });
@@ -299,7 +296,6 @@ describe('OpenAPI contract (e2e)', () => {
   });
 
   it('external consent challenge: 400 validation and 409 owner mismatch / 503 both documented', async () => {
-    if (!available) return;
     const bad = { tokenId: 1, from: 'nope', to: 'nope', purpose: 'REENTRY' };
     const invalid = await post(
       '/internal/v1/external-consent-challenges',
@@ -311,7 +307,6 @@ describe('OpenAPI contract (e2e)', () => {
   });
 
   it('operator endpoints: failures/records pages validate; inbound key is 403 HMAC_SCOPE_FORBIDDEN', async () => {
-    if (!available) return;
     const failures = await request(server())
       .get('/internal/v1/audit/failures?page=1&pageSize=5')
       .set(operator('GET', '/internal/v1/audit/failures?page=1&pageSize=5'));
@@ -352,7 +347,6 @@ describe('OpenAPI contract (e2e)', () => {
   });
 
   it('every documented path has at least one assertion in this suite (coverage guard)', () => {
-    if (!available) return;
     const covered = new Set([
       '/health',
       '/ready',

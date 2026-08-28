@@ -25,7 +25,7 @@ const LOCK_RELEASING_STATUSES = new Set([
 export type ServiceRightsState = 'EXTERNAL_INACTIVE' | 'ELIGIBLE_FOR_ACTIVATION';
 
 /** 검증 D2/D7 (§4 계약): the outbound completion webhook body — the same shape
- * `docs/openapi.yaml#/components/schemas/BlockchainEvent` documents. */
+ * `openapi.yaml#/components/schemas/BlockchainEvent` documents. */
 export interface BlockchainEventPayload extends Record<string, unknown> {
   notificationId: string;
   operationId: string;

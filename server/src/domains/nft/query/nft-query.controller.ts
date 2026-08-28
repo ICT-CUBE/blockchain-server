@@ -7,7 +7,7 @@ import { CubeNftReaderService } from '../../transaction/rpc/cube-nft-reader.serv
 import { describeRpcError } from '../../transaction/rpc/rpc-error';
 import { RpcService } from '../../transaction/rpc/rpc.service';
 
-/** `docs/openapi.yaml#/components/schemas/NftView`. */
+/** `openapi.yaml#/components/schemas/NftView`. */
 export interface NftViewResponse {
   tokenId: number;
   minted: boolean;

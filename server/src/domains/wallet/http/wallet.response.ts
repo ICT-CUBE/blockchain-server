@@ -1,6 +1,6 @@
 import type { WalletAccountStatus } from '../persistence/wallet-account.entity';
 
-/** `docs/openapi.yaml#/components/schemas/Wallet` (검증 개선안 §4.1 policy):
+/** `openapi.yaml#/components/schemas/Wallet` (검증 개선안 §4.1 policy):
  * - `provider` is the *logical* custody provider the API contract promises (`WEB3AUTH`), not the
  *   physical adapter name;
  * - `providerAdapter` + `integrationReady` expose which adapter is actually bound, so a development

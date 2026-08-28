@@ -5,9 +5,12 @@ import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 import { load as loadYaml } from 'js-yaml';
 
-/** `docs/openapi.yaml` lives outside the repository (non-versioned design docs) — one level above
- * `blockchain-server/`. The contract test is skipped with a clear message when it is not present. */
-export const OPENAPI_PATH = path.join(__dirname, '..', '..', '..', '..', 'docs', 'openapi.yaml');
+/** `openapi.yaml` at the repo root is the versioned source of truth the internal API must satisfy;
+ * `openapi-contract.e2e-spec.ts` validates every real response against it. It used to live in the
+ * unversioned `docs/` tree one level up, which meant a docs reshuffle silently turned the whole
+ * contract suite into no-ops (검증 피드백 2026-08-28) — keeping it in the repo makes that
+ * impossible. `docs/` may still carry a copy for the Backend handoff bundle; this file is canonical. */
+export const OPENAPI_PATH = path.join(__dirname, '..', '..', '..', 'openapi.yaml');
 
 interface OpenApiDocument {
   paths: Record<string, Record<string, OpenApiOperation>>;

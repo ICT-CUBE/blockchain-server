@@ -98,15 +98,17 @@ npm run deploy:amoy --workspace=contracts/cube-nft
 - **D2** Transfer는 현재 owner == 판매자 수탁 지갑일 때만 접수; 워커는 tx 없는 ONCHAIN_CONFIRMED를 만들지 않음(→ REVIEW_REQUIRED `OWNER_ALREADY_AT_DESTINATION`).
 - **D3** Reentry/External-Resale 접수 전에 relayer 시점 `eth_call` dry-run으로 서명·nonce·deadline·owner·pause를 검증(403/409, RPC 장애는 503); `transition()`이 `reviewReason/failureCode`를 기록; 운영자 복구 `POST /internal/v1/audit/operations/{id}/resolve-review`.
 - **D4/D5** DataSource `timezone: 'Z'`. **D6** 최종 확정/실패 시 raw tx ciphertext 폐기. **D7** receipt block/hash/status·confirmedAt 저장, blockHash 재조회 검증, `GET /operations/{id}`에 `txAttempts`·증거·알림 상태 노출. **D8** 외부 서명은 암호화 저장·해시 기록·제출 후 폐기. **D9** `tsconfig.build.json rootDir=src` → `dist/main.js`. **D10** 잘못된 key scope는 403 `HMAC_SCOPE_FORBIDDEN`. **D11** RPC 오류 로그는 `class/code: reason`만 기록(raw tx·payload redaction).
-- `GET /internal/v1/nfts/{tokenId}`, Metadata 이미지 제한(strict base64·크기·magic byte), Wallet 응답(`provider=WEB3AUTH`, `providerAdapter`, `integrationReady`, `createdAt`), webhook payload를 `docs/openapi.yaml#BlockchainEvent`와 일치.
+- `GET /internal/v1/nfts/{tokenId}`, Metadata 이미지 제한(strict base64·크기·magic byte), Wallet 응답(`provider=WEB3AUTH`, `providerAdapter`, `integrationReady`, `createdAt`), webhook payload를 `openapi.yaml#BlockchainEvent`와 일치.
 
 ### 2차 remediation (docs/verification/문제-정의-원인-분석-개선안.md)
 
 - **문제 1** 모든 MySQL 연결을 세션 `time_zone = '+00:00'`로 고정(`DatabaseTimezoneEnforcer` + `enforce-utc-session-timezone.ts`) — `timezone: 'Z'`는 드라이버 파싱만 UTC로 바꿀 뿐 세션은 서버 기본값을 따르므로, KST 호스트에서 타임스탬프가 9시간 어긋나고 `LONG_PENDING` 오탐이 나던 문제 제거. `SignedAttemptRecoveryWorker`의 재시도 due 판정도 앱 `Date` 대신 `NOW(3)`로 통일(`nextBroadcastAt`는 `DATE_ADD(NOW(3), …)`로 기록) → nonce gap 후 signer 영구 halt 재발 방지.
 - **문제 2** 통합 스펙마다 공유 자원(고정 Hardhat signer·MySQL)의 휘발성 테이블을 파일 실행 전 초기화(`test/integration/reset-db-between-files.ts`, `setupFilesAfterEnv`) → 한 스펙의 실패가 뒤 스펙을 signer halt로 연쇄 실패시키지 않음. `test:integration`은 UTC·KST MySQL에서 반복 실행해도 63/63.
 - **문제 3** `deploy:localhost`(= `--network localhost`) 스크립트 추가 — README가 `deploy:local`에 `--network`를 중복 전달해 `HHE510`으로 실패하던 문제 수정.
+- **OpenAPI 계약 테스트 공백** OpenAPI 명세를 저장소 안(`code/openapi.yaml`)으로 옮기고 `openapi-contract.e2e-spec.ts`가 그 파일을 읽도록 수정. 이전에는 비버전관리 `docs/openapi.yaml`을 찾다가 문서 재배치로 파일을 못 찾으면 **8개 테스트가 assertion 없이 통과**(silent skip)하던 상태였음 — 파일 부재 시 이제 suite가 실패한다. 명세는 실제 구현과 대조 검증됨(v1.1.0, 8/8 실질 통과).
 
 ## 문서
 
 - 구현 계획, 요구사항, 검증 계획, 개발 로그, AC 추적표 — 이 저장소 상위 `docs/` (비버전관리 영역)
+- **`openapi.yaml`** (저장소 루트) — 내부 API 계약의 버전관리 원본. `openapi-contract.e2e-spec.ts`가 실제 응답을 이 파일로 검증한다. Backend 핸드오프용 사본이 `docs/`에 있을 수 있으나 이 파일이 정본이다.
 - `.env.example` — 전체 환경변수 목록과 각 TASK별 설명

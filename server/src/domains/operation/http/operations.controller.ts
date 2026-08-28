@@ -15,7 +15,7 @@ import type { Operation } from '../persistence/operation.entity';
 import { InvalidOperationTransitionError, OperationRepository } from '../persistence/operation.repository';
 import type { NotificationStateResponse, OperationResponse, TxAttemptResponse } from './operation.response';
 
-/** `docs/openapi.yaml#/components/schemas/CancelRequest` — optional: a bare cancel is still valid,
+/** `openapi.yaml#/components/schemas/CancelRequest` — optional: a bare cancel is still valid,
  * a supplied reason is recorded in the state history for traceability. */
 const cancelRequestSchema = z
   .object({

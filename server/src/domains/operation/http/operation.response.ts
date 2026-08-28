@@ -30,7 +30,7 @@ export interface NotificationStateResponse {
   lastError: string | null;
 }
 
-/** `GET /internal/v1/operations/:id` — `docs/openapi.yaml#/components/schemas/OperationView`.
+/** `GET /internal/v1/operations/:id` — `openapi.yaml#/components/schemas/OperationView`.
  * Works independently of webhook delivery (TASK-12 §5) and carries the confirmation evidence and
  * notification state the plan requires (검증 D7, §4 계약). */
 export interface OperationResponse {
