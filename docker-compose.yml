@@ -24,8 +24,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Pin the container's PORT regardless of what .env carries, so the mapping below always
+      # matches what the app binds (검증 계획서 §3 uses 3100).
+      PORT: 3100
     ports:
-      # PORT defaults to 3100 (see .env.example — matches the 검증 계획서 curl examples).
       - '3100:3100'
     depends_on:
       mysql:

@@ -93,17 +93,12 @@ npm run deploy:amoy --workspace=contracts/cube-nft
 | `npm run fill-nonce-gap --workspace=server -- --signer relayer [--dry-run]` | 운영자 승인 절차: signer nonce gap을 0-value self tx로 메우고 halt 해제 (D1 §10) |
 
 `test:contract`/`test:unit`/`test:integration`/`test:api`/`test:nonfunctional`는 뒤 인자를 실제
-runner로 전달한다(`npm run test:contract -- --grep <regex>`). 계획서 명령과의 차이:
-
-| 계획서 명령 | 현재 저장소 |
-|---|---|
-| `test:contract -- --grep "CubeNFT core"` | 그런 describe 없음 → `test:contract -- --grep "CubeNFT"` (또는 `mintTo`, `authorizedTransfer` 등 실제 `describe`명) |
-| `test:contract -- --grep "governance\|upgrade"` | `test:contract -- --grep "governance"` + `-- --grep "upgrade"` |
-| `test:integration -- --runInBand database` | DB-only 스펙은 `*-repository.integration-spec.ts` → `test:integration -- repository` |
-
-공백이 있는 grep 문자열은 npm 중첩 스크립트에서 quote가 깨진다 — 공백 없는 정규식이나
+runner로 전달한다(`npm run test:contract -- --grep <regex>`, `npm run test:integration -- <경로패턴>`).
+`docs/0. 세팅/5. 검증 계획서.md`의 필터 명령은 실제 `describe`명·스펙 경로에 맞춰 갱신했다
+(TASK-02 `--grep "CubeNFT"`, TASK-04 `-- repository` / `-- operation-repository`).
+공백이 있는 grep은 npm 중첩 스크립트에서 quote가 깨지므로 공백 없는 정규식이나
 `cd contracts/cube-nft && npx hardhat test --grep "…"` 직접 실행을 쓴다. 서버 포트는 `PORT`
-(기본 **3100** — 계획서 §3의 curl 예시와 일치).
+(env.schema·`.env.example`·docker 전부 기본 **3100** — 계획서 §3의 curl 예시와 일치).
 
 ### Remediation 요약 (docs/검증-종합-문제-원인-개선안.md)
 

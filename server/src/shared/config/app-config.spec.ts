@@ -14,7 +14,7 @@ const TEST_RELAYER_SIGNER_PRIVATE_KEY = `0x${'5'.repeat(64)}`;
 function baseEnv(overrides: Partial<NodeJS.ProcessEnv> = {}): NodeJS.ProcessEnv {
   return {
     NODE_ENV: 'test',
-    PORT: '3000',
+    PORT: '3100',
     CUBE_NFT_NETWORK: 'localhost',
     CUBE_NFT_DEPLOYMENTS_DIR: FIXTURES_DIR,
     DATABASE_URL: 'mysql://user:pass@127.0.0.1:3306/cube_nft_test',
@@ -41,7 +41,7 @@ describe('loadConfig', () => {
     const config = loadConfig(baseEnv());
 
     expect(config.nodeEnv).toBe('test');
-    expect(config.port).toBe(3000);
+    expect(config.port).toBe(3100);
     expect(config.cubeNft.deployment.chainId).toBe(31337);
     expect(config.cubeNft.deployment.proxyAddress).toBe('0x1111111111111111111111111111111111111111');
     expect(config.cubeNft.abi.length).toBeGreaterThan(0);

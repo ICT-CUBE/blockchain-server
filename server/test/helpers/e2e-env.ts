@@ -17,7 +17,7 @@ export const APPROVAL_JWT_AUDIENCE = 'arzone-blockchain-server';
 export function applyE2eTestEnv(): void {
   process.env.NODE_ENV = 'test';
   // Never actually bound: these suites call app.init(), not app.listen().
-  process.env.PORT = '3000';
+  process.env.PORT = '3100';
   process.env.CUBE_NFT_NETWORK = 'localhost';
   process.env.CUBE_NFT_DEPLOYMENTS_DIR = FIXTURES_DIR;
   process.env.DATABASE_URL = process.env.DATABASE_URL ?? 'mysql://cube_nft:cube_nft@127.0.0.1:3306/cube_nft';

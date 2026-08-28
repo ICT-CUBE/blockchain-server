@@ -27,7 +27,7 @@ const CONTRACTS_DEPLOYMENTS_DIR = path.join(__dirname, '..', '..', '..', 'contra
 
 function setEnv(): void {
   process.env.NODE_ENV = 'test';
-  process.env.PORT = '3000';
+  process.env.PORT = '3100';
   process.env.CUBE_NFT_NETWORK = 'hardhatMainnet';
   process.env.CUBE_NFT_DEPLOYMENTS_DIR = CONTRACTS_DEPLOYMENTS_DIR;
   process.env.DATABASE_URL =

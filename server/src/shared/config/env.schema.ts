@@ -18,7 +18,7 @@ const minLength32Base64UrlSecret = z
 
 const baseEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().int().positive().default(3000),
+  PORT: z.coerce.number().int().positive().default(3100),
   /** Selects which `<network>.json` deployment artifact to load (e.g. "hardhatMainnet", "amoy"). */
   CUBE_NFT_NETWORK: z.string().min(1, 'CUBE_NFT_NETWORK is required'),
   /** Overrides where deployment artifacts are read from. Defaults to the `@cube-nft/contracts`
