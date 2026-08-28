@@ -7,6 +7,16 @@ export enum FailureCode {
   REPEATED_FAILURE = 'REPEATED_FAILURE',
   OWNER_MISMATCH = 'OWNER_MISMATCH',
   WEBHOOK_FAILED = 'WEBHOOK_FAILED',
+  /** A worker's submission was rejected deterministically before/at signing (e.g. the stored
+   * external consent reverts at estimateGas) — the Operation went to REVIEW_REQUIRED (검증 D3). */
+  SUBMISSION_REJECTED = 'SUBMISSION_REJECTED',
+  /** A SIGNED attempt exhausted its broadcast retry budget or hit a permanent reject (검증 D1). */
+  BROADCAST_RETRY_EXHAUSTED = 'BROADCAST_RETRY_EXHAUSTED',
+  /** The chain reported `nonce too high` for a signer: a lower nonce is missing and the signer's
+   * pipeline is halted until the gap is filled (검증 D1). */
+  SIGNER_NONCE_GAP = 'SIGNER_NONCE_GAP',
+  /** An operator resolved a REVIEW_REQUIRED Operation through the limited recovery endpoint. */
+  OPERATOR_RESOLVED = 'OPERATOR_RESOLVED',
 }
 
 /** A durable record of a failure or inconsistency worth operator attention, distinct from

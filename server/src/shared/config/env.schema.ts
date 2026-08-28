@@ -94,6 +94,14 @@ const baseEnvSchema = z.object({
       message: 'must be a base64-encoded 32-byte AES-256-GCM key',
     }),
   SUBMISSION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+  /** 검증 D1: a SIGNED attempt whose broadcast keeps failing transiently is retried with
+   * exponential backoff (base = SUBMISSION_POLL_INTERVAL_MS, capped at BROADCAST_MAX_BACKOFF_MS)
+   * at most BROADCAST_MAX_RETRIES times before the Operation goes to REVIEW_REQUIRED. */
+  BROADCAST_MAX_RETRIES: z.coerce.number().int().positive().default(30),
+  BROADCAST_MAX_BACKOFF_MS: z.coerce.number().int().positive().default(60000),
+  /** 검증 D1: an ACTIVE nonce reservation with no committed attempt older than this is treated
+   * as orphaned (process died between reserve and commit) and becomes re-usable. */
+  NONCE_RESERVATION_LEASE_MS: z.coerce.number().int().positive().default(60000),
   /** How long a BROADCAST attempt may sit unconfirmed before the pending monitor fee-bumps it. */
   RBF_THRESHOLD_MS: z.coerce
     .number()
@@ -134,6 +142,13 @@ const baseEnvSchema = z.object({
   PINATA_JWT: z.string().min(1).optional(),
   NFT_STORAGE_TOKEN: z.string().min(1).optional(),
   METADATA_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+  /** Maximum decoded image size accepted by `POST /internal/v1/metadata` (Blockchain Server
+   * uploads the image itself — 검증 개선안 §5 option 2 — so it must bound the bytes it accepts). */
+  METADATA_IMAGE_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(2 * 1024 * 1024),
 
   /** TASK-14: structured logging level. */
   LOG_LEVEL: z.enum(['debug', 'log', 'warn', 'error']).default('log'),

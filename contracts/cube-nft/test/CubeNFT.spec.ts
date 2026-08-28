@@ -499,7 +499,11 @@ describe("CubeNFT", function () {
     it("the compiled ABI does not expose a burn function", async () => {
       const CubeNFTFactory = await ethers.getContractFactory("CubeNFT");
       const fragment = CubeNFTFactory.interface.fragments.find(
-        (f) => f.type === "function" && "name" in f && f.name.toLowerCase().includes("burn"),
+        (f) =>
+          f.type === "function" &&
+          "name" in f &&
+          typeof f.name === "string" &&
+          f.name.toLowerCase().includes("burn"),
       );
       expect(fragment).to.equal(undefined);
     });

@@ -11,6 +11,7 @@ import { FailureCode } from '../../audit/persistence/failure-record.entity';
 import { OperationRepository } from '../../operation/persistence/operation.repository';
 import { decryptRawTransaction } from '../encryption/raw-transaction-cipher';
 import { TransactionAttempt } from '../persistence/transaction-attempt.entity';
+import { describeRpcError } from '../rpc/rpc-error';
 import { RpcService } from '../rpc/rpc.service';
 import { SystemSignerService } from '../signing/system-signer.service';
 import { TransactionSubmissionService } from './transaction-submission.service';
@@ -57,9 +58,7 @@ export class PendingMonitorWorker extends IntervalWorker {
       try {
         await this.evaluate(attempt);
       } catch (error) {
-        this.logger.warn(
-          `Pending-monitor pass failed for attempt ${attempt.id}: ${(error as Error).message}`,
-        );
+        this.logger.warn(`Pending-monitor pass failed for attempt ${attempt.id}: ${describeRpcError(error)}`);
       }
     }
   }
@@ -131,6 +130,9 @@ export class PendingMonitorWorker extends IntervalWorker {
   }
 
   private async replaceWithHigherFee(previous: TransactionAttempt): Promise<void> {
+    if (!previous.rawTransactionCiphertext) {
+      throw new Error(`Attempt ${previous.id}'s raw transaction was purged — cannot rebuild for RBF`);
+    }
     const rawTransaction = decryptRawTransaction(
       this.appConfig.submission.rawTxEncryptionKey,
       previous.rawTransactionCiphertext,

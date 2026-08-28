@@ -11,6 +11,7 @@ import {
   MetadataPinStatus,
   MetadataPreservationStatus,
 } from '../persistence/metadata-dependency.entity';
+import { decodeAndValidateImage } from '../image-validation';
 import { PINNING_PORT, type PinningPort } from './pinning.port';
 import { PRESERVATION_PORT, type PreservationPort } from './preservation.port';
 import type { PrepareMetadataRequest } from '../metadata-request.schema';
@@ -56,7 +57,12 @@ export class MetadataService {
   ) {}
 
   async prepare(input: PrepareMetadataRequest): Promise<PrepareMetadataResult> {
-    const imageBytes = Buffer.from(input.imageBase64, 'base64');
+    // 검증 개선안 §5: bounded, content-sniffed image bytes — never blindly decode and pin.
+    const { bytes: imageBytes } = decodeAndValidateImage(
+      input.imageBase64,
+      input.imageMimeType,
+      this.appConfig.metadata.imageMaxBytes,
+    );
     const { cid: imageCid } = await this.pinning.pin(imageBytes);
     await this.recordDependency(input.tokenId, imageCid, MetadataDependencyKind.IMAGE, imageBytes);
 

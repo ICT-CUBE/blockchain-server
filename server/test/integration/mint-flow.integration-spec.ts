@@ -33,6 +33,8 @@ import { FakeWeb3AuthAdapter } from '../../src/domains/wallet/providers/fake-web
 import { WalletService } from '../../src/domains/wallet/application/wallet.service';
 import { createTestDataSource } from './test-data-source';
 
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // 검증 §5: metadata images must be real image bytes
+
 const CONTRACTS_DEPLOYMENTS_DIR = path.join(__dirname, '..', '..', '..', 'contracts', 'deployments');
 const RPC_URL = 'http://127.0.0.1:8545';
 const MINT_SIGNER_PRIVATE_KEY = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
@@ -123,7 +125,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
       tokenId,
       cubeNumber: `CUBE-${tokenId}`,
       publicGrade: 'A',
-      imageBase64: Buffer.from(`fixture-image-${tokenId}`).toString('base64'),
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`fixture-image-${tokenId}`)]).toString('base64'),
       benefitReferenceId: `benefit-${tokenId}`,
     });
   }
@@ -158,7 +160,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
     );
     mintApplication = new MintApplication(walletService, operationIntake, cubeNftReader, metadataService);
 
-    const nonceCoordinator = new NonceCoordinator(dataSource, rpc);
+    const nonceCoordinator = new NonceCoordinator(dataSource, rpc, appConfig);
     const systemSigner = new SystemSignerService(appConfig);
     const submission = new TransactionSubmissionService(
       dataSource,
@@ -166,6 +168,8 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
       rpc,
       systemSigner,
       appConfig,
+      new OperationRepository(dataSource),
+      new AuditWriter(dataSource.getRepository(AuditRecord), dataSource.getRepository(FailureRecord)),
     );
     operationRepository = new OperationRepository(dataSource);
     const assetLockRepository = new AssetLockRepository(dataSource);
@@ -277,7 +281,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
     expect((caught as ApiError).getStatus()).toBe(409);
   }, 30000);
 
-  it('worker finalizes idempotently when the token is already minted to the expected owner', async () => {
+  it('worker flags REVIEW_REQUIRED (never a tx-less ONCHAIN_CONFIRMED) when the token was already minted to the expected owner by another path', async () => {
     if (skip) return;
 
     const userId = `user-${randomUUID()}`;
@@ -294,7 +298,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
       tokenId,
       `ipfs://test/${tokenId}.json`,
     ]);
-    const nonceCoordinator = new NonceCoordinator(dataSource, rpc);
+    const nonceCoordinator = new NonceCoordinator(dataSource, rpc, appConfig);
     const systemSigner = new SystemSignerService(appConfig);
     const directSubmission = new TransactionSubmissionService(
       dataSource,
@@ -302,6 +306,8 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
       rpc,
       systemSigner,
       appConfig,
+      new OperationRepository(dataSource),
+      new AuditWriter(dataSource.getRepository(AuditRecord), dataSource.getRepository(FailureRecord)),
     );
     const bootstrapOperation = await operationRepository.createOrGet({
       idempotencyKey: randomUUID(),
@@ -327,6 +333,7 @@ describe('TASK-07 mint flow end-to-end (integration, real local chain)', () => {
     await (mintWorker as unknown as { runOnce(): Promise<void> }).runOnce();
 
     const finalOperation = await operationRepository.findById(operation.id);
-    expect(finalOperation?.status).toBe(OperationStatus.ONCHAIN_CONFIRMED);
+    expect(finalOperation?.status).toBe(OperationStatus.REVIEW_REQUIRED);
+    expect(finalOperation?.reviewReason).toBe('OWNER_ALREADY_AT_DESTINATION');
   }, 30000);
 });

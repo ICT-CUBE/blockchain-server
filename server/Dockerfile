@@ -13,13 +13,23 @@ FROM deps AS build
 COPY . .
 RUN npm run build:contracts && npm run build:server
 
+# Production-only dependency tree for the runtime image: no Hardhat/Mocha/Jest/ESLint toolchain
+# (which is where the audit's `high` finding lives) ships to production.
+FROM build AS prod-deps
+RUN npm prune --omit=dev
+
 FROM node:24-slim AS runtime
 WORKDIR /workspace
 ENV NODE_ENV=production
-COPY --from=build /workspace/node_modules ./node_modules
-COPY --from=build /workspace/contracts/cube-nft/deployments ./contracts/cube-nft/deployments
+COPY --from=prod-deps /workspace/node_modules ./node_modules
+# Deployment artifacts live in `contracts/deployments/` (written by contracts/cube-nft/scripts/deploy.ts,
+# read by server/src/shared/config/contract-deployment.loader.ts via `@cube-nft/contracts/../deployments`).
+COPY --from=build /workspace/contracts/deployments ./contracts/deployments
 COPY --from=build /workspace/contracts/cube-nft/package.json ./contracts/cube-nft/package.json
 COPY --from=build /workspace/server/dist ./server/dist
 COPY --from=build /workspace/server/package.json ./server/package.json
+COPY --from=build /workspace/package.json ./package.json
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 CMD ["node", "server/dist/main.js"]

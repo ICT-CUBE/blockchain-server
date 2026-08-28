@@ -127,8 +127,16 @@ describe('TASK-10 transaction submission (integration, real local chain)', () =>
     appConfig = new AppConfigService();
     rpc = new RpcService(appConfig);
     systemSigner = new SystemSignerService(appConfig);
-    nonceCoordinator = new NonceCoordinator(dataSource, rpc);
-    submission = new TransactionSubmissionService(dataSource, nonceCoordinator, rpc, systemSigner, appConfig);
+    nonceCoordinator = new NonceCoordinator(dataSource, rpc, appConfig);
+    submission = new TransactionSubmissionService(
+      dataSource,
+      nonceCoordinator,
+      rpc,
+      systemSigner,
+      appConfig,
+      new OperationRepository(dataSource),
+      new AuditWriter(dataSource.getRepository(AuditRecord), dataSource.getRepository(FailureRecord)),
+    );
     operationRepository = new OperationRepository(dataSource);
     mintInterface = new Interface(appConfig.cubeNft.abi as never);
     chainId = appConfig.cubeNft.deployment.chainId;

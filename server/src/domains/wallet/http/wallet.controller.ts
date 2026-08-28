@@ -4,6 +4,7 @@ import { HmacGuard } from '../../../shared/auth/hmac/hmac.guard';
 import { ApiError } from '../../../shared/http/api-error';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
 import { WalletService } from '../application/wallet.service';
+import type { WalletAccount } from '../persistence/wallet-account.entity';
 import { prepareWalletRequestSchema, type PrepareWalletRequest } from './wallet-request.schema';
 import type { WalletResponse } from './wallet.response';
 
@@ -22,12 +23,7 @@ export class WalletController {
     @Body(new ZodValidationPipe(prepareWalletRequestSchema)) body: PrepareWalletRequest,
   ): Promise<WalletResponse> {
     const wallet = await this.walletService.getOrCreate(body.userId);
-    return {
-      userId: wallet.userId,
-      address: wallet.address,
-      provider: wallet.provider,
-      status: wallet.status,
-    };
+    return this.toResponse(wallet);
   }
 
   @Get(':userId')
@@ -37,11 +33,18 @@ export class WalletController {
     if (!wallet) {
       throw new ApiError('WALLET_NOT_FOUND', `No custodial wallet provisioned for userId ${userId}`, 404);
     }
+    return this.toResponse(wallet);
+  }
+
+  private toResponse(wallet: WalletAccount): WalletResponse {
     return {
       userId: wallet.userId,
       address: wallet.address,
-      provider: wallet.provider,
+      provider: 'WEB3AUTH',
+      providerAdapter: wallet.provider,
+      integrationReady: wallet.provider !== 'fake-web3auth',
       status: wallet.status,
+      createdAt: wallet.createdAt.toISOString(),
     };
   }
 }

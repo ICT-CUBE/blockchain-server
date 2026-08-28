@@ -58,14 +58,28 @@ export class TransactionAttempt {
   @Column({ name: 'max_priority_fee_per_gas_wei', type: 'varchar', length: 78, nullable: true })
   maxPriorityFeePerGasWei!: string | null;
 
-  /** AES-256-GCM (dev) / KMS envelope (prod) encrypted signed raw transaction. Purged once the
-   * Operation reaches a terminal state and no further replacement is possible (TASK-10 §5). Never
-   * returned by any API or written to logs. */
-  @Column({ name: 'raw_transaction_ciphertext', type: 'text' })
-  rawTransactionCiphertext!: string;
+  /** AES-256-GCM (dev) / KMS envelope (prod) encrypted signed raw transaction. Purged (set to
+   * null, `rawTransactionPurgedAt` stamped) once the Operation is finally confirmed or failed and
+   * no re-broadcast/RBF can ever be needed (TASK-10 §5, 검증 D6). Never returned by any API or
+   * written to logs. */
+  @Column({ name: 'raw_transaction_ciphertext', type: 'text', nullable: true })
+  rawTransactionCiphertext!: string | null;
 
   @Column({ name: 'raw_transaction_purged_at', type: 'timestamp', precision: 3, nullable: true })
   rawTransactionPurgedAt!: Date | null;
+
+  /** How many times a broadcast of this exact raw transaction has been attempted (initial +
+   * `SignedAttemptRecoveryWorker` retries). Drives exponential backoff and the retry cap (검증 D1). */
+  @Column({ name: 'broadcast_attempt_count', type: 'int', unsigned: true, default: 0 })
+  broadcastAttemptCount!: number;
+
+  /** Earliest time the recovery worker may try broadcasting again; null = immediately. */
+  @Column({ name: 'next_broadcast_at', type: 'timestamp', precision: 3, nullable: true })
+  nextBroadcastAt!: Date | null;
+
+  /** Redacted `class/code: reason` of the last failed broadcast — never the raw RPC payload. */
+  @Column({ name: 'last_broadcast_error', type: 'varchar', length: 255, nullable: true })
+  lastBroadcastError!: string | null;
 
   /** Self-reference: the earlier attempt (for the same operation/nonce) this one fee-bumps. */
   @Column({ name: 'replaces_attempt_id', type: 'char', length: 36, nullable: true })

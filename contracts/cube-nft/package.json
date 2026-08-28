@@ -13,7 +13,8 @@
     "lint": "solhint 'contracts/**/*.sol'",
     "node": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy.ts --network hardhatMainnet",
-    "deploy:amoy": "hardhat run scripts/deploy.ts --network amoy"
+    "deploy:amoy": "hardhat run scripts/deploy.ts --network amoy",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "hardhat": "3.14.0",

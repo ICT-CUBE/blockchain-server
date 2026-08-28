@@ -17,6 +17,8 @@ import {
 import { prepareMetadataRequestSchema } from '../../src/domains/metadata/metadata-request.schema';
 import { createTestDataSource } from './test-data-source';
 
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // 검증 §5: metadata images must be real image bytes
+
 const CONTRACTS_DEPLOYMENTS_DIR = path.join(__dirname, '..', '..', '..', 'contracts', 'deployments');
 
 function setEnv(): void {
@@ -90,7 +92,7 @@ describe('MetadataService (integration, real DB)', () => {
       tokenId: 1,
       cubeNumber: 'CUBE-1',
       publicGrade: 'A',
-      imageBase64: Buffer.from('x').toString('base64'),
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from('x')]).toString('base64'),
       benefitReferenceId: 'benefit-1',
       ownerNationalId: '123-45-6789', // not on the allowlist — must be rejected outright
     });
@@ -104,7 +106,7 @@ describe('MetadataService (integration, real DB)', () => {
       tokenId,
       cubeNumber: `CUBE-${tokenId}`,
       publicGrade: 'A',
-      imageBase64: Buffer.from(`image-${tokenId}`).toString('base64'),
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`image-${tokenId}`)]).toString('base64'),
       benefitReferenceId: `benefit-${tokenId}`,
     };
 
@@ -129,7 +131,7 @@ describe('MetadataService (integration, real DB)', () => {
       tokenId,
       cubeNumber: `CUBE-${tokenId}`,
       publicGrade: 'A',
-      imageBase64: Buffer.from(`image-${tokenId}`).toString('base64'),
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`image-${tokenId}`)]).toString('base64'),
       benefitReferenceId: `benefit-${tokenId}`,
     });
 
@@ -146,7 +148,7 @@ describe('MetadataService (integration, real DB)', () => {
 
   it('does not reach READY if the image dependency fails to pin, even though the metadata JSON step never runs', async () => {
     const tokenId = randomTokenId();
-    const imageBytes = Buffer.from(`image-${tokenId}`).toString('base64');
+    const imageBytes = Buffer.concat([PNG_MAGIC, Buffer.from(`image-${tokenId}`)]).toString('base64');
     const failingPinning = new SelectivelyFailingPinningAdapter(new FakePinningAdapter(), () => true);
     const service = makeService(failingPinning, new FakePreservationAdapter());
 
@@ -172,7 +174,7 @@ describe('MetadataService (integration, real DB)', () => {
       tokenId,
       cubeNumber: `CUBE-${tokenId}`,
       publicGrade: 'A',
-      imageBase64: Buffer.from(`image-${tokenId}`).toString('base64'),
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`image-${tokenId}`)]).toString('base64'),
       benefitReferenceId: `benefit-${tokenId}`,
     });
 

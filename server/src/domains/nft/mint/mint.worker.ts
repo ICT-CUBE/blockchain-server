@@ -71,19 +71,20 @@ export class MintWorker extends IntervalWorker {
 
   private async process(operation: Operation): Promise<void> {
     if (!operation.toAddress) {
-      throw new Error(`Mint operation ${operation.id} has no toAddress`);
+      // Unprocessable row (cannot be produced via the API) — park it for a human instead of throwing
+      // on every tick, which would occupy the batch and starve valid Operations behind it.
+      await this.transitionQuietly(operation.id, OperationStatus.REVIEW_REQUIRED, 'INVALID_OPERATION_DATA');
+      return;
     }
     const expectedOwner = getAddress(operation.toAddress);
 
     const actualOwner = await this.cubeNftReader.ownerOf(operation.tokenId);
 
-    if (actualOwner && getAddress(actualOwner) === expectedOwner) {
-      await this.finalizeAlreadyMinted(operation);
-      return;
-    }
-
-    if (actualOwner && getAddress(actualOwner) !== expectedOwner) {
-      await this.flagOwnerConflict(operation, actualOwner);
+    // 검증 D2: an Operation without its own transaction is never marked ONCHAIN_CONFIRMED. A token
+    // that is already minted by the time we get here — to the expected owner or anyone else — was
+    // minted by something other than this Operation, which is an integrity question for a human.
+    if (actualOwner) {
+      await this.flagOwnerConflict(operation, actualOwner, getAddress(actualOwner) === expectedOwner);
       return;
     }
 
@@ -112,27 +113,24 @@ export class MintWorker extends IntervalWorker {
     await this.transitionQuietly(operation.id, OperationStatus.SUBMITTED, 'MINT_SUBMITTED');
   }
 
-  /** Idempotent completion (TASK-07 §5: "이미 owner가 기대 지갑이면... 새 Mint하지 않는다") — no
-   * transaction needed, the token was already correctly minted (e.g. a retried accept after a
-   * prior successful mint whose Operation never reached this worker in time). */
-  private async finalizeAlreadyMinted(operation: Operation): Promise<void> {
+  /** The token got minted between accept-time and now — a data-integrity concern, not something
+   * to retry automatically and (TASK-07 §5 "이미 owner가 기대 지갑이면 새 Mint하지 않는다") never a
+   * second mint; 검증 D2 also forbids reporting it as this Operation's success. */
+  private async flagOwnerConflict(
+    operation: Operation,
+    actualOwner: string,
+    alreadyAtDestination: boolean,
+  ): Promise<void> {
     await this.transitionQuietly(
       operation.id,
-      OperationStatus.ONCHAIN_CONFIRMED,
-      'ALREADY_MINTED_IDEMPOTENT',
+      OperationStatus.REVIEW_REQUIRED,
+      alreadyAtDestination ? 'OWNER_ALREADY_AT_DESTINATION' : 'OWNER_MISMATCH_AT_SUBMIT',
     );
-    await this.assetLockRepository.release(operation.tokenId);
-  }
-
-  /** The owner changed between accept-time and now to something other than what this Operation
-   * expects — a data-integrity concern, not something to retry automatically. */
-  private async flagOwnerConflict(operation: Operation, actualOwner: string): Promise<void> {
-    await this.transitionQuietly(operation.id, OperationStatus.REVIEW_REQUIRED, 'OWNER_MISMATCH_AT_SUBMIT');
     await this.auditWriter
       .writeFailure({
         code: FailureCode.OWNER_MISMATCH,
         operationId: operation.id,
-        details: { expectedOwner: operation.toAddress, actualOwner },
+        details: { expectedOwner: operation.toAddress, actualOwner, alreadyAtDestination },
       })
       .catch((error: unknown) => {
         this.logger.warn(

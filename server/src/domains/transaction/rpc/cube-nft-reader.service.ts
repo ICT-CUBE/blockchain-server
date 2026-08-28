@@ -6,6 +6,7 @@ import { RpcService } from './rpc.service';
 
 const OWNER_OF_INTERFACE = new Interface(['function ownerOf(uint256) view returns (address)']);
 const CONSENT_NONCE_INTERFACE = new Interface(['function consentNonce(uint256) view returns (uint256)']);
+const TOKEN_URI_INTERFACE = new Interface(['function tokenURI(uint256) view returns (string)']);
 
 function isNonexistentTokenRevert(error: unknown): boolean {
   return (
@@ -37,6 +38,23 @@ export class CubeNftReaderService {
         .call({ to: this.appConfig.cubeNft.deployment.proxyAddress, data });
       const [owner] = OWNER_OF_INTERFACE.decodeFunctionResult('ownerOf', raw);
       return owner as string;
+    } catch (error) {
+      if (isNonexistentTokenRevert(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /** The on-chain `tokenURI`, or `null` for a never-minted token. Rethrows RPC failures. */
+  async tokenUri(tokenId: number): Promise<string | null> {
+    const data = TOKEN_URI_INTERFACE.encodeFunctionData('tokenURI', [tokenId]);
+    try {
+      const raw = await this.rpc
+        .getReadProvider()
+        .call({ to: this.appConfig.cubeNft.deployment.proxyAddress, data });
+      const [uri] = TOKEN_URI_INTERFACE.decodeFunctionResult('tokenURI', raw);
+      return uri as string;
     } catch (error) {
       if (isNonexistentTokenRevert(error)) {
         return null;

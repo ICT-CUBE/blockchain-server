@@ -5,6 +5,7 @@ import { AuditModule } from './domains/audit/audit.module';
 import { ExternalConsentChallengeModule } from './domains/nft/external-consent-challenge/external-consent-challenge.module';
 import { ExternalResaleModule } from './domains/nft/external-resale/external-resale.module';
 import { MintModule } from './domains/nft/mint/mint.module';
+import { NftQueryModule } from './domains/nft/query/nft-query.module';
 import { ReentryModule } from './domains/nft/reentry/reentry.module';
 import { TransferModule } from './domains/nft/transfer/transfer.module';
 import { WithdrawalModule } from './domains/nft/withdrawal/withdrawal.module';
@@ -29,6 +30,7 @@ import { RequestIdMiddleware } from './shared/http/request-id.middleware';
     TransactionSubmissionModule,
     ConfirmationModule,
     MintModule,
+    NftQueryModule,
     TransferModule,
     WithdrawalModule,
     ReentryModule,

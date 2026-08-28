@@ -23,6 +23,9 @@ export function createTestDataSource(): DataSource {
   return new DataSource({
     type: 'mysql',
     url: databaseUrl,
+    // Same UTC contract as the runtime `DatabaseModule` (검증 D4) — without it this test DataSource
+    // would itself misread TIMESTAMP columns in the host's local zone.
+    timezone: 'Z',
     entities: ALL_ENTITIES,
     synchronize: false,
   });

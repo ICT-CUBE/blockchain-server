@@ -16,6 +16,9 @@ import { SystemSignerService } from '../../src/domains/transaction/signing/syste
 import { TransactionSubmissionService } from '../../src/domains/transaction/submission/transaction-submission.service';
 import { OperationFinalizer } from '../../src/domains/operation/finalizer/operation-finalizer.service';
 import { OperationRepository } from '../../src/domains/operation/persistence/operation.repository';
+import { AuditWriter } from '../../src/domains/audit/application/audit-writer';
+import { AuditRecord } from '../../src/domains/audit/persistence/audit-record.entity';
+import { FailureRecord } from '../../src/domains/audit/persistence/failure-record.entity';
 import { createTestDataSource } from './test-data-source';
 
 const CONTRACTS_DEPLOYMENTS_DIR = path.join(__dirname, '..', '..', '..', 'contracts', 'deployments');
@@ -93,8 +96,16 @@ describe('TASK-11 confirmation & reconciliation (integration, real local chain)'
     appConfig = new AppConfigService();
     rpc = new RpcService(appConfig);
     systemSigner = new SystemSignerService(appConfig);
-    const nonceCoordinator = new NonceCoordinator(dataSource, rpc);
-    submission = new TransactionSubmissionService(dataSource, nonceCoordinator, rpc, systemSigner, appConfig);
+    const nonceCoordinator = new NonceCoordinator(dataSource, rpc, appConfig);
+    submission = new TransactionSubmissionService(
+      dataSource,
+      nonceCoordinator,
+      rpc,
+      systemSigner,
+      appConfig,
+      new OperationRepository(dataSource),
+      new AuditWriter(dataSource.getRepository(AuditRecord), dataSource.getRepository(FailureRecord)),
+    );
     operationRepository = new OperationRepository(dataSource);
     assetLockRepository = new AssetLockRepository(dataSource);
     confirmationService = new ConfirmationService(dataSource, rpc, appConfig);

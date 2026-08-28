@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { AppConfigService } from '../../../shared/config/app-config.service';
 import type { Operation } from '../../operation/persistence/operation.entity';
 import { TransactionAttempt } from '../persistence/transaction-attempt.entity';
+import { describeRpcError } from '../rpc/rpc-error';
 import { RpcService } from '../rpc/rpc.service';
 
 const TRANSFER_EVENT_TOPIC = topicId('Transfer(address,address,uint256)');
@@ -14,6 +15,9 @@ export type ConfirmationResult =
       outcome: 'CONFIRMED';
       winningAttemptId: string;
       blockNumber: number;
+      /** 검증 D7: persisted as confirmation evidence and re-checked against a fresh receipt read. */
+      blockHash: string;
+      receiptStatus: number;
       confirmations: number;
       actualOwner: string;
     }
@@ -26,6 +30,10 @@ export type ConfirmationResult =
  * `ConfirmationService.evaluate(operation)`). Never writes anything — `OperationFinalizer` is what
  * turns a result into a state transition. Checks every attempt (not just the latest) because RBF
  * means any one of them could be the one that actually landed.
+ *
+ * 명세 §11 conditions, in order: receipt exists → status=1 → expected event with matching tokenId/to
+ * → `confirmations = latest - receiptBlock + 1 >= MIN_CONFIRMATIONS` → `ownerOf` matches → receipt
+ * block hash still identical on a second read (a mismatch means a reorg is in progress: stay PENDING).
  */
 @Injectable()
 export class ConfirmationService {
@@ -53,7 +61,7 @@ export class ConfirmationService {
       try {
         receipt = await this.rpc.getTransactionReceipt(attempt.txHash);
       } catch (error) {
-        this.logger.warn(`Receipt lookup failed for attempt ${attempt.id}: ${(error as Error).message}`);
+        this.logger.warn(`Receipt lookup failed for attempt ${attempt.id}: ${describeRpcError(error)}`);
         continue;
       }
       if (!receipt) {
@@ -88,10 +96,22 @@ export class ConfirmationService {
         return { outcome: 'REVIEW_REQUIRED', reason: 'OWNER_MISMATCH' };
       }
 
+      // 명세 §11.7: the receipt's block hash must read back identically — otherwise the block we
+      // judged on was reorged out from under us and nothing above can be trusted yet.
+      const recheck = await this.rpc.getTransactionReceipt(attempt.txHash);
+      if (!recheck || recheck.blockHash !== receipt.blockHash) {
+        this.logger.warn(
+          `Receipt block hash changed on re-read for attempt ${attempt.id} — possible reorg, staying PENDING`,
+        );
+        return { outcome: 'PENDING' };
+      }
+
       return {
         outcome: 'CONFIRMED',
         winningAttemptId: attempt.id,
         blockNumber: receipt.blockNumber,
+        blockHash: receipt.blockHash,
+        receiptStatus: receipt.status,
         confirmations,
         actualOwner,
       };

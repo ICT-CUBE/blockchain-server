@@ -170,9 +170,17 @@ describe('TASK-12 notification delivery (integration, real local chain + real HT
 
     appConfig = new AppConfigService();
     rpc = new RpcService(appConfig);
-    const nonceCoordinator = new NonceCoordinator(dataSource, rpc);
+    const nonceCoordinator = new NonceCoordinator(dataSource, rpc, appConfig);
     const systemSigner = new SystemSignerService(appConfig);
-    submission = new TransactionSubmissionService(dataSource, nonceCoordinator, rpc, systemSigner, appConfig);
+    submission = new TransactionSubmissionService(
+      dataSource,
+      nonceCoordinator,
+      rpc,
+      systemSigner,
+      appConfig,
+      new OperationRepository(dataSource),
+      new AuditWriter(dataSource.getRepository(AuditRecord), dataSource.getRepository(FailureRecord)),
+    );
     operationRepository = new OperationRepository(dataSource);
     assetLockRepository = new AssetLockRepository(dataSource);
     notificationOutbox = new NotificationOutboxRepository(dataSource);

@@ -44,7 +44,12 @@ describe('POST /internal/v1/wallets + GET /internal/v1/wallets/:userId (e2e)', (
       .send(bodyString);
 
     expect(prepareResponse.status).toBe(200);
-    expect(prepareResponse.body).toMatchObject({ userId, provider: 'fake-web3auth' });
+    expect(prepareResponse.body).toMatchObject({
+      userId,
+      provider: 'WEB3AUTH',
+      providerAdapter: 'fake-web3auth',
+      integrationReady: false,
+    });
     expect(typeof (prepareResponse.body as { address: string }).address).toBe('string');
     // Never return anything resembling a raw private key.
     expect(JSON.stringify(prepareResponse.body)).not.toMatch(/^0x[0-9a-fA-F]{64}$/);

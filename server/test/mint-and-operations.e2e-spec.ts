@@ -19,6 +19,8 @@ import {
 import { signHmacRequest } from './helpers/hmac-sign';
 import { signApprovalJwt } from './helpers/jwt-sign';
 
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // 검증 §5: metadata images must be real image bytes
+
 const MINTS_PATH = '/internal/v1/mints';
 const WALLETS_PATH = '/internal/v1/wallets';
 const METADATA_PATH = '/internal/v1/metadata';
@@ -120,7 +122,7 @@ describe('POST /internal/v1/mints + GET /internal/v1/operations/:id (e2e)', () =
       tokenId,
       cubeNumber: `CUBE-${tokenId}`,
       publicGrade: 'A',
-      imageBase64: Buffer.from(`fixture-image-${tokenId}`).toString('base64'),
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`fixture-image-${tokenId}`)]).toString('base64'),
       benefitReferenceId: `benefit-${tokenId}`,
     });
     const response = await request(server())

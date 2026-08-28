@@ -12,6 +12,7 @@ import { Operation } from '../../operation/persistence/operation.entity';
 import { OperationRepository } from '../../operation/persistence/operation.repository';
 import { AssetLockRepository } from '../../transaction/persistence/asset-lock.repository';
 import { CubeNftReaderService } from '../../transaction/rpc/cube-nft-reader.service';
+import { describeRpcError } from '../../transaction/rpc/rpc-error';
 import {
   encodeAuthorizedTransfer,
   ownerConsentDomain,
@@ -31,8 +32,11 @@ const BATCH_SIZE = 20;
  * TASK-08 §5's worker half: polls REQUESTED Transfer Operations. For each, re-verifies the current
  * owner right before submitting (the *mandatory* "제출 직전 owner 재검증", TASK-07/08 §12), mints a
  * fresh `OwnerConsent` signed by the seller's own custodial wallet, and submits
- * `authorizedTransfer` through the ARZONE relayer (`AUTHORIZED_TRANSFER_ROLE`). Idempotent the same
- * way `MintWorker` is: already-at-the-expected-owner needs no new transaction.
+ * `authorizedTransfer` through the ARZONE relayer (`AUTHORIZED_TRANSFER_ROLE`).
+ *
+ * 검증 D2: an Operation this worker did not actually put on chain is never marked
+ * ONCHAIN_CONFIRMED. If the token is no longer with the seller by the time we get here — even if it
+ * is already with the buyer — that is an owner conflict for a human to look at, not a silent success.
  */
 @Injectable()
 export class TransferWorker extends IntervalWorker {
@@ -67,7 +71,7 @@ export class TransferWorker extends IntervalWorker {
         await this.process(operation);
       } catch (error) {
         this.logger.warn(
-          `Transfer processing failed for operation ${operation.id}: ${(error as Error).message}`,
+          `Transfer processing failed for operation ${operation.id}: ${describeRpcError(error)}`,
         );
       }
     }
@@ -75,20 +79,16 @@ export class TransferWorker extends IntervalWorker {
 
   private async process(operation: Operation): Promise<void> {
     if (!operation.fromAddress || !operation.toAddress) {
-      throw new Error(`Transfer operation ${operation.id} is missing from/to`);
+      // Unprocessable row — park it rather than throwing every tick and starving the batch.
+      await this.transitionQuietly(operation.id, OperationStatus.REVIEW_REQUIRED, 'INVALID_OPERATION_DATA');
+      return;
     }
     const expectedFrom = getAddress(operation.fromAddress);
     const expectedTo = getAddress(operation.toAddress);
 
     const actualOwner = await this.cubeNftReader.ownerOf(operation.tokenId);
-
-    if (actualOwner && getAddress(actualOwner) === expectedTo) {
-      await this.finalizeAlreadyTransferred(operation);
-      return;
-    }
-
     if (!actualOwner || getAddress(actualOwner) !== expectedFrom) {
-      await this.flagOwnerConflict(operation, actualOwner);
+      await this.flagOwnerConflict(operation, actualOwner, expectedTo);
       return;
     }
 
@@ -137,27 +137,29 @@ export class TransferWorker extends IntervalWorker {
     return this.dataSource.getRepository(WalletAccount).findOne({ where: { address } });
   }
 
-  /** Idempotent completion — the token already sits with the expected buyer, no new transaction
-   * needed (e.g. a retried accept after a prior successful transfer whose Operation never reached
-   * this worker in time). */
-  private async finalizeAlreadyTransferred(operation: Operation): Promise<void> {
+  /** The current owner is not the expected seller — a data-integrity concern, not something to
+   * retry automatically, and not a success even when the holder happens to be the buyer. */
+  private async flagOwnerConflict(
+    operation: Operation,
+    actualOwner: string | null,
+    expectedTo: string,
+  ): Promise<void> {
+    const alreadyAtDestination = actualOwner !== null && getAddress(actualOwner) === expectedTo;
     await this.transitionQuietly(
       operation.id,
-      OperationStatus.ONCHAIN_CONFIRMED,
-      'ALREADY_TRANSFERRED_IDEMPOTENT',
+      OperationStatus.REVIEW_REQUIRED,
+      alreadyAtDestination ? 'OWNER_ALREADY_AT_DESTINATION' : 'OWNER_MISMATCH_AT_SUBMIT',
     );
-    await this.assetLockRepository.release(operation.tokenId);
-  }
-
-  /** The current owner is neither the expected seller nor the expected buyer — a data-integrity
-   * concern, not something to retry automatically. */
-  private async flagOwnerConflict(operation: Operation, actualOwner: string | null): Promise<void> {
-    await this.transitionQuietly(operation.id, OperationStatus.REVIEW_REQUIRED, 'OWNER_MISMATCH_AT_SUBMIT');
     await this.auditWriter
       .writeFailure({
         code: FailureCode.OWNER_MISMATCH,
         operationId: operation.id,
-        details: { expectedFrom: operation.fromAddress, expectedTo: operation.toAddress, actualOwner },
+        details: {
+          expectedFrom: operation.fromAddress,
+          expectedTo: operation.toAddress,
+          actualOwner,
+          alreadyAtDestination,
+        },
       })
       .catch((error: unknown) => {
         this.logger.warn(

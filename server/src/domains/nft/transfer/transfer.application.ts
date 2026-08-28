@@ -9,6 +9,7 @@ import {
   OperationIntakeService,
   type AcceptApprovedMutationResult,
 } from '../../../shared/idempotency/operation-intake.service';
+import { OperationRepository } from '../../operation/persistence/operation.repository';
 import { CubeNftReaderService } from '../../transaction/rpc/cube-nft-reader.service';
 import { WalletService } from '../../wallet/application/wallet.service';
 import type { TransferRequestBody } from './transfer-request.schema';
@@ -16,9 +17,13 @@ import type { TransferRequestBody } from './transfer-request.schema';
 /**
  * TASK-08 §5: mirrors Mint's "never trust a raw address claim" pattern for both sides of a trade —
  * seller and buyer custodial wallets are looked up on file, and the approval JWT's `from`/`to` must
- * agree with what's found. Rejects a self-trade, a token that isn't currently owned by the claimed
- * seller, and (like Mint) does a best-effort accept-time owner check ahead of the mandatory
- * submit-time one in `TransferWorker`.
+ * agree with what's found. Rejects a self-trade and a token that isn't currently owned by the
+ * claimed seller.
+ *
+ * 검증 D2: a new Transfer is accepted **only** when the current on-chain owner is the resolved
+ * seller. "Token already sits with the buyer" is not, by itself, evidence that *this* trade
+ * executed — the only idempotent case honoured is a prior confirmed Transfer Operation for the same
+ * `tradeId`/token, whose existing result is returned. Anything else is `TRANSFER_OWNER_MISMATCH`.
  */
 @Injectable()
 export class TransferApplication {
@@ -28,6 +33,7 @@ export class TransferApplication {
     private readonly walletService: WalletService,
     private readonly operationIntake: OperationIntakeService,
     private readonly cubeNftReader: CubeNftReaderService,
+    private readonly operationRepository: OperationRepository,
   ) {}
 
   async accept(
@@ -84,17 +90,26 @@ export class TransferApplication {
       throw new ApiError('TRANSFER_SELF_TRADE', 'Seller and buyer resolve to the same custodial wallet', 409);
     }
 
-    // Best-effort — see MintApplication's identical reasoning: the mandatory re-check is
-    // TransferWorker's, right before it would actually submit `authorizedTransfer`. `undefined`
-    // means "RPC unavailable, unknown" and must not block acceptance; only a definitive answer
-    // (confirmed not-minted, or confirmed owned by neither party) rejects here.
+    // Best-effort accept-time owner check; `undefined` means "RPC unavailable, unknown" and does
+    // not block acceptance — TransferWorker re-verifies right before submitting. A *definitive*
+    // answer, however, is authoritative here: not minted, or owned by anyone but the seller, rejects.
     const ownerCheck = await this.tryReadOwner(body.tokenId);
     if (ownerCheck.status === 'known') {
       if (ownerCheck.owner === null) {
         throw new ApiError('TRANSFER_TOKEN_NOT_MINTED', `tokenId ${body.tokenId} has not been minted`, 409);
       }
       const owner = getAddress(ownerCheck.owner);
-      if (owner !== resolvedFrom && owner !== resolvedTo) {
+      if (owner !== resolvedFrom) {
+        if (owner === resolvedTo) {
+          const prior = await this.operationRepository.findConfirmedTransferByTradeId(
+            body.tradeId,
+            body.tokenId,
+          );
+          if (prior) {
+            // The buyer holds the token *because this trade already executed* — return that result.
+            return { operation: prior, created: false };
+          }
+        }
         throw new ApiError(
           'TRANSFER_OWNER_MISMATCH',
           `tokenId ${body.tokenId} is not currently owned by the claimed seller`,

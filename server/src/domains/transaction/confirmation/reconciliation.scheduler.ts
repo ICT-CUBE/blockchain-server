@@ -8,6 +8,7 @@ import { AuditWriter } from '../../audit/application/audit-writer';
 import { FailureCode } from '../../audit/persistence/failure-record.entity';
 import { OperationFinalizer } from '../../operation/finalizer/operation-finalizer.service';
 import { Operation } from '../../operation/persistence/operation.entity';
+import { describeRpcError } from '../rpc/rpc-error';
 import { ConfirmationService } from './confirmation.service';
 
 /**
@@ -55,7 +56,7 @@ export class ReconciliationScheduler extends IntervalWorker {
         }
       } catch (error) {
         this.logger.warn(
-          `Reconciliation pass failed for operation ${operation.id}: ${(error as Error).message}`,
+          `Reconciliation pass failed for operation ${operation.id}: ${describeRpcError(error)}`,
         );
       }
     }

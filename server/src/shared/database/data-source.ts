@@ -22,6 +22,8 @@ if (!databaseUrl) {
 export default new DataSource({
   type: 'mysql',
   url: databaseUrl,
+  // Same UTC contract as the runtime `DatabaseModule` — see the note there (검증 D4/D5).
+  timezone: 'Z',
   entities: ALL_ENTITIES,
   migrations: [path.join(__dirname, 'migrations', '*.{js,ts}')],
   synchronize: false,

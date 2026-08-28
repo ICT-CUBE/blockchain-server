@@ -63,6 +63,10 @@ export interface SubmissionConfig {
   readonly rbfThresholdMs: number;
   readonly rbfMaxAttempts: number;
   readonly rbfFeeBumpPercent: number;
+  /** 검증 D1 broadcast retry policy. */
+  readonly broadcastMaxRetries: number;
+  readonly broadcastMaxBackoffMs: number;
+  readonly nonceReservationLeaseMs: number;
 }
 
 export interface ConfirmationConfig {
@@ -85,6 +89,7 @@ export interface MetadataConfig {
   readonly pinataJwt: string | null;
   readonly nftStorageToken: string | null;
   readonly httpTimeoutMs: number;
+  readonly imageMaxBytes: number;
 }
 
 export interface LoggingConfig {
@@ -206,6 +211,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       rbfThresholdMs: parsedEnv.RBF_THRESHOLD_MS,
       rbfMaxAttempts: parsedEnv.RBF_MAX_ATTEMPTS,
       rbfFeeBumpPercent: parsedEnv.RBF_FEE_BUMP_PERCENT,
+      broadcastMaxRetries: parsedEnv.BROADCAST_MAX_RETRIES,
+      broadcastMaxBackoffMs: parsedEnv.BROADCAST_MAX_BACKOFF_MS,
+      nonceReservationLeaseMs: parsedEnv.NONCE_RESERVATION_LEASE_MS,
     }),
     confirmation: Object.freeze({
       blocksRequired: parsedEnv.CONFIRMATION_BLOCKS_REQUIRED,
@@ -233,6 +241,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       pinataJwt: parsedEnv.PINATA_JWT ?? null,
       nftStorageToken: parsedEnv.NFT_STORAGE_TOKEN ?? null,
       httpTimeoutMs: parsedEnv.METADATA_HTTP_TIMEOUT_MS,
+      imageMaxBytes: parsedEnv.METADATA_IMAGE_MAX_BYTES,
     }),
     logging: Object.freeze({
       level: parsedEnv.LOG_LEVEL,

@@ -12,6 +12,7 @@ import { Operation } from '../../operation/persistence/operation.entity';
 import { OperationRepository } from '../../operation/persistence/operation.repository';
 import { AssetLockRepository } from '../../transaction/persistence/asset-lock.repository';
 import { CubeNftReaderService } from '../../transaction/rpc/cube-nft-reader.service';
+import { describeRpcError } from '../../transaction/rpc/rpc-error';
 import {
   encodeAuthorizedTransfer,
   ownerConsentDomain,
@@ -28,7 +29,8 @@ import { WalletAccount } from '../../wallet/persistence/wallet-account.entity';
 const BATCH_SIZE = 20;
 
 /** TASK-09 §5's Withdrawal worker: same shape as `TransferWorker`, purpose WITHDRAWAL — the
- * custodial wallet signs its own consent to move the token to the user's external address. */
+ * custodial wallet signs its own consent to move the token to the user's external address.
+ * 검증 D2: never marks an Operation ONCHAIN_CONFIRMED without its own transaction. */
 @Injectable()
 export class WithdrawalWorker extends IntervalWorker {
   protected readonly logger = new Logger(WithdrawalWorker.name);
@@ -62,7 +64,7 @@ export class WithdrawalWorker extends IntervalWorker {
         await this.process(operation);
       } catch (error) {
         this.logger.warn(
-          `Withdrawal processing failed for operation ${operation.id}: ${(error as Error).message}`,
+          `Withdrawal processing failed for operation ${operation.id}: ${describeRpcError(error)}`,
         );
       }
     }
@@ -70,25 +72,16 @@ export class WithdrawalWorker extends IntervalWorker {
 
   private async process(operation: Operation): Promise<void> {
     if (!operation.fromAddress || !operation.toAddress) {
-      throw new Error(`Withdrawal operation ${operation.id} is missing from/to`);
+      // Unprocessable row — park it rather than throwing every tick and starving the batch.
+      await this.transitionQuietly(operation.id, OperationStatus.REVIEW_REQUIRED, 'INVALID_OPERATION_DATA');
+      return;
     }
     const expectedFrom = getAddress(operation.fromAddress);
     const expectedTo = getAddress(operation.toAddress);
 
     const actualOwner = await this.cubeNftReader.ownerOf(operation.tokenId);
-
-    if (actualOwner && getAddress(actualOwner) === expectedTo) {
-      await this.transitionQuietly(
-        operation.id,
-        OperationStatus.ONCHAIN_CONFIRMED,
-        'ALREADY_WITHDRAWN_IDEMPOTENT',
-      );
-      await this.assetLockRepository.release(operation.tokenId);
-      return;
-    }
-
     if (!actualOwner || getAddress(actualOwner) !== expectedFrom) {
-      await this.flagOwnerConflict(operation, actualOwner);
+      await this.flagOwnerConflict(operation, actualOwner, expectedTo);
       return;
     }
 
@@ -135,15 +128,27 @@ export class WithdrawalWorker extends IntervalWorker {
     await this.transitionQuietly(operation.id, OperationStatus.SUBMITTED, 'WITHDRAWAL_SUBMITTED');
   }
 
-  /** The current owner is neither the expected sender nor the expected external recipient — a
-   * data-integrity concern, not something to retry automatically. */
-  private async flagOwnerConflict(operation: Operation, actualOwner: string | null): Promise<void> {
-    await this.transitionQuietly(operation.id, OperationStatus.REVIEW_REQUIRED, 'OWNER_MISMATCH_AT_SUBMIT');
+  private async flagOwnerConflict(
+    operation: Operation,
+    actualOwner: string | null,
+    expectedTo: string,
+  ): Promise<void> {
+    const alreadyAtDestination = actualOwner !== null && getAddress(actualOwner) === expectedTo;
+    await this.transitionQuietly(
+      operation.id,
+      OperationStatus.REVIEW_REQUIRED,
+      alreadyAtDestination ? 'OWNER_ALREADY_AT_DESTINATION' : 'OWNER_MISMATCH_AT_SUBMIT',
+    );
     await this.auditWriter
       .writeFailure({
         code: FailureCode.OWNER_MISMATCH,
         operationId: operation.id,
-        details: { expectedFrom: operation.fromAddress, expectedTo: operation.toAddress, actualOwner },
+        details: {
+          expectedFrom: operation.fromAddress,
+          expectedTo: operation.toAddress,
+          actualOwner,
+          alreadyAtDestination,
+        },
       })
       .catch((error: unknown) => {
         this.logger.warn(

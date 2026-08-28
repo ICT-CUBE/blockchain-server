@@ -21,6 +21,7 @@ import { AssetLockRepository } from '../../src/domains/transaction/persistence/a
 import { NotificationOutboxRepository } from '../../src/domains/notification/persistence/notification-outbox.repository';
 import { CubeNftReaderService } from '../../src/domains/transaction/rpc/cube-nft-reader.service';
 import { RpcService } from '../../src/domains/transaction/rpc/rpc.service';
+import { ConsentDryRunService } from '../../src/domains/transaction/rpc/consent-dry-run.service';
 import {
   encodeAuthorizedTransfer,
   OWNER_CONSENT_TYPES,
@@ -188,9 +189,17 @@ describe('TASK-09 external wallet lifecycle (integration, real local chain)', ()
       new AssetLockRepository(dataSource),
     );
 
-    const nonceCoordinator = new NonceCoordinator(dataSource, rpc);
+    const nonceCoordinator = new NonceCoordinator(dataSource, rpc, appConfig);
     const systemSigner = new SystemSignerService(appConfig);
-    submission = new TransactionSubmissionService(dataSource, nonceCoordinator, rpc, systemSigner, appConfig);
+    submission = new TransactionSubmissionService(
+      dataSource,
+      nonceCoordinator,
+      rpc,
+      systemSigner,
+      appConfig,
+      new OperationRepository(dataSource),
+      new AuditWriter(dataSource.getRepository(AuditRecord), dataSource.getRepository(FailureRecord)),
+    );
     operationRepository = new OperationRepository(dataSource);
     assetLockRepository = new AssetLockRepository(dataSource);
 
@@ -211,7 +220,13 @@ describe('TASK-09 external wallet lifecycle (integration, real local chain)', ()
       auditWriter,
     );
 
-    reentryApplication = new ReentryApplication(walletService, operationIntake, cubeNftReader, appConfig);
+    reentryApplication = new ReentryApplication(
+      walletService,
+      operationIntake,
+      cubeNftReader,
+      appConfig,
+      new ConsentDryRunService(rpc, appConfig),
+    );
     reentryWorker = new ReentryWorker(
       dataSource,
       operationRepository,
@@ -227,6 +242,7 @@ describe('TASK-09 external wallet lifecycle (integration, real local chain)', ()
       operationIntake,
       cubeNftReader,
       appConfig,
+      new ConsentDryRunService(rpc, appConfig),
     );
     externalResaleWorker = new ExternalResaleWorker(
       dataSource,

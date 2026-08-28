@@ -77,7 +77,22 @@ describe('NotificationOutboxRepository (integration)', () => {
     const secondClaimImmediately = await repository.claimDueBatch(GENEROUS_LIMIT, 1);
     expect(secondClaimImmediately.some((r) => r.notificationId === notificationId)).toBe(false);
 
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    // Wait on the DB's own clock, not a fixed sleep: the row becomes claimable exactly when its
+    // `locked_until` is in the past according to MySQL (개선안 §7 — no wall-clock flake under CI load).
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const rows = await dataSource.query<{ expired: number }[]>(
+        'SELECT (locked_until IS NULL OR locked_until < NOW(3)) AS expired FROM outbox_notifications WHERE id = ?',
+        [enqueued.id],
+      );
+      if (Number(rows[0]?.expired) === 1) {
+        break;
+      }
+      if (Date.now() > deadline) {
+        throw new Error('lock never expired according to the DB clock');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
 
     const thirdClaimAfterExpiry = await repository.claimDueBatch(GENEROUS_LIMIT, 1);
     expect(thirdClaimAfterExpiry.some((r) => r.notificationId === notificationId)).toBe(true);

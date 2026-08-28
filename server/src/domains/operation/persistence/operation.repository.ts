@@ -180,10 +180,22 @@ export class OperationRepository {
     nextStatus: OperationStatus,
     reason: string,
   ): Promise<Operation> {
+    // 검증 D3: the machine-readable reason is persisted on the Operation itself (not only in the
+    // append-only history) so `GET /operations/:id` can expose *why* it sits in REVIEW_REQUIRED or
+    // FAILED. Leaving REVIEW_REQUIRED clears the stale reason.
+    const reasonPatch: QueryDeepPartialEntity<Operation> =
+      nextStatus === OperationStatus.REVIEW_REQUIRED
+        ? { reviewReason: reason.slice(0, 255) }
+        : nextStatus === OperationStatus.FAILED
+          ? { failureCode: reason.slice(0, 64), reviewReason: null }
+          : expectedStatus === OperationStatus.REVIEW_REQUIRED
+            ? { reviewReason: null }
+            : {};
+
     const result = await manager
       .createQueryBuilder()
       .update(Operation)
-      .set({ status: nextStatus, version: () => 'version + 1' })
+      .set({ status: nextStatus, version: () => 'version + 1', ...reasonPatch })
       .where('id = :operationId', { operationId })
       .andWhere('status = :expectedStatus', { expectedStatus })
       .execute();
@@ -205,6 +217,23 @@ export class OperationRepository {
 
   async findById(operationId: string): Promise<Operation | null> {
     return this.dataSource.getRepository(Operation).findOne({ where: { id: operationId } });
+  }
+
+  /** 검증 D2: the only legitimate "already transferred" idempotent case — a *prior, confirmed*
+   * Transfer Operation for the same trade and token. Used by `TransferApplication` to return that
+   * existing result instead of accepting a new Operation for a trade that already executed. */
+  async findConfirmedTransferByTradeId(tradeId: string, tokenId: number): Promise<Operation | null> {
+    return this.dataSource
+      .getRepository(Operation)
+      .createQueryBuilder('operation')
+      .where('operation.type = :type', { type: OperationType.TRANSFER })
+      .andWhere('operation.token_id = :tokenId', { tokenId })
+      .andWhere('operation.status IN (:...statuses)', {
+        statuses: [OperationStatus.ONCHAIN_CONFIRMED, OperationStatus.COMPLETED],
+      })
+      .andWhere("JSON_UNQUOTE(JSON_EXTRACT(operation.metadata, '$.tradeId')) = :tradeId", { tradeId })
+      .orderBy('operation.created_at', 'DESC')
+      .getOne();
   }
 
   async findHistory(operationId: string): Promise<OperationStateHistory[]> {

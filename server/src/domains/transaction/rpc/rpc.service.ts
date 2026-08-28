@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { JsonRpcProvider, type TransactionReceipt } from 'ethers';
 
 import { AppConfigService } from '../../../shared/config/app-config.service';
+import { describeRpcError, summarizeRpcError } from './rpc-error';
 
 export interface FeeEstimate {
   maxFeePerGas: bigint;
@@ -15,17 +16,16 @@ export interface ReceiptSummary {
   logs: readonly { address: string; topics: readonly string[]; data: string }[];
 }
 
-function isAlreadyKnownError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message.toLowerCase() : '';
-  return message.includes('already known') || message.includes('nonce too low');
-}
-
 /**
  * Primary/backup RPC failover (NFR-012~014, TASK-10 §5 "Primary 실패 시 ... Backup에 제출"). Every
  * call tries Primary first and falls back to Backup only on failure — this is deliberately not a
  * quorum/majority `FallbackProvider`, since the plan calls for an explicit ordered failover, not
  * consensus between endpoints. Also exposes the read-only `Provider` other services (e.g. TASK-11's
  * `ownerOf` checks) build `ethers.Contract` instances against.
+ *
+ * 검증 D11: nothing in this class ever logs `error.message` verbatim — ethers embeds the full
+ * JSON-RPC request (signed raw transactions included) in it. `describeRpcError` is the only form
+ * an RPC error takes in a log line.
  */
 @Injectable()
 export class RpcService {
@@ -55,7 +55,7 @@ export class RpcService {
         throw error;
       }
       this.logger.warn(
-        `Primary RPC failed for ${operationName} (${(error as Error).message}); retrying against backup`,
+        `Primary RPC failed for ${operationName} (${describeRpcError(error)}); retrying against backup`,
       );
       return op(this.backup);
     }
@@ -91,6 +91,15 @@ export class RpcService {
     return this.withFailover('estimateGas', (p) => p.estimateGas(tx));
   }
 
+  /** `eth_call` dry-run of exactly the calldata a worker would later submit, from the given sender
+   * (검증 D3: "실제 relayer 주소를 from으로 사용해 Operation·lock 생성 전에 eth_call dry-run"). Rejects
+   * with ethers' `CALL_EXCEPTION` (carrying revert `data`) on a deterministic revert, or with a
+   * network/server error when the RPC itself is unavailable — callers tell the two apart via
+   * `summarizeRpcError`. */
+  async simulateCall(tx: { from: string; to: string; data: string; value?: bigint }): Promise<string> {
+    return this.withFailover('simulateCall', (p) => p.call(tx));
+  }
+
   /** Broadcasts a signed raw transaction. Treats "already known" / "nonce too low" errors as
    * success — both mean a prior attempt (this call racing its own retry, or Primary having actually
    * accepted it despite an error reaching us) already got the same transaction into the mempool or
@@ -100,7 +109,8 @@ export class RpcService {
     try {
       await this.withFailover('broadcastTransaction', (p) => p.broadcastTransaction(rawTransactionHex));
     } catch (error) {
-      if (isAlreadyKnownError(error)) {
+      const summary = summarizeRpcError(error);
+      if (summary.class === 'ALREADY_KNOWN' || summary.class === 'NONCE_TOO_LOW') {
         return;
       }
       throw error;

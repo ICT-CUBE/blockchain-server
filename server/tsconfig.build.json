@@ -1,4 +1,17 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test", "dist", "**/*spec.ts"]
+  "compilerOptions": {
+    // Production build emits `dist/main.js` (what `start:prod` and the Dockerfile run) — never
+    // `dist/src/main.js`. Anchoring rootDir at `src/` also keeps `config.module.ts`'s compiled
+    // `__dirname/../../../../.env` pointing at the repository root, exactly as it does under ts-node.
+    "rootDir": "src",
+    // A stale `tsconfig.build.tsbuildinfo` from a previous layout produced a partial `dist/` (missing
+    // modules → MODULE_NOT_FOUND at start). Production builds are always full builds.
+    "incremental": false
+  },
+  // `scripts/` and `mock-receiver/` are ts-node entry points (`npm run redeliver`, `npm run
+  // mock-receiver`, `npm run auth:headers`), not part of the server artifact, so they are excluded
+  // from the production build on purpose.
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "test", "dist", "scripts", "mock-receiver", "**/*spec.ts"]
 }

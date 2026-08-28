@@ -17,7 +17,18 @@
     "test:contracts": "npm run test --workspace=contracts/cube-nft",
     "test:server": "npm run test --workspace=server",
     "build:contracts": "npm run build --workspace=contracts/cube-nft",
-    "build:server": "npm run build --workspace=server"
+    "build:server": "npm run build --workspace=server",
+    "typecheck": "npm run typecheck --workspace=contracts/cube-nft && npm run typecheck --workspace=server",
+    "test:unit": "npm run test --workspace=server",
+    "test:contract": "npm run test --workspace=contracts/cube-nft",
+    "test:integration": "npm run test:integration --workspace=server",
+    "test:api": "npm run test:e2e --workspace=server",
+    "test:nonfunctional": "npm run test:nonfunctional --workspace=server",
+    "test:amoy": "npm run amoy:acceptance --workspace=server",
+    "auth:headers": "npm run auth:headers --workspace=server --",
+    "smoke:build": "npm run build:server && node -e \"require('node:fs').accessSync('server/dist/main.js'); console.log('OK server/dist/main.js')\"",
+    "scan:sensitive": "npm run scan:sensitive --workspace=server --",
+    "smoke:docker": "docker build -f server/Dockerfile -t cube-nft-blockchain-server:smoke . && docker run --rm --name cube-nft-smoke -d -p 3377:3000 --env-file .env -e PORT=3000 -e DATABASE_URL=${SMOKE_DATABASE_URL:-mysql://cube_nft:cube_nft@host.docker.internal:3306/cube_nft} -e TRANSACTION_RPC_URL_PRIMARY=${SMOKE_RPC_URL:-http://host.docker.internal:8545} -e CUBE_NFT_NETWORK=${SMOKE_NETWORK:-localhost} cube-nft-blockchain-server:smoke && sleep 12 && curl -fsS http://127.0.0.1:3377/health && curl -fsS http://127.0.0.1:3377/ready; STATUS=$?; docker rm -f cube-nft-smoke >/dev/null; exit $STATUS"
   },
   "allowScripts": {
     "esbuild@0.28.2": true,

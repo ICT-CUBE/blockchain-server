@@ -22,6 +22,39 @@ const LOCK_RELEASING_STATUSES = new Set([
   OperationStatus.CANCELLED,
 ]);
 
+export type ServiceRightsState = 'EXTERNAL_INACTIVE' | 'ELIGIBLE_FOR_ACTIVATION';
+
+/** 검증 D2/D7 (§4 계약): the outbound completion webhook body — the same shape
+ * `docs/openapi.yaml#/components/schemas/BlockchainEvent` documents. */
+export interface BlockchainEventPayload extends Record<string, unknown> {
+  notificationId: string;
+  operationId: string;
+  idempotencyKey: string;
+  operationType: OperationType;
+  tokenId: number;
+  finalStatus: 'ONCHAIN_CONFIRMED';
+  finalOwnerAddress: string;
+  txHash: string;
+  blockNumber: number;
+  blockHash: string;
+  confirmations: number;
+  serviceRightsState: ServiceRightsState | null;
+  confirmedAt: string;
+}
+
+/** 검증 D9/§4: the value `OperationType` → rights state mapping, shared with `OperationsController`. */
+export function rightsStateFor(type: OperationType): ServiceRightsState | null {
+  switch (type) {
+    case OperationType.WITHDRAWAL:
+      return 'EXTERNAL_INACTIVE';
+    case OperationType.REENTRY:
+    case OperationType.EXTERNAL_RESALE:
+      return 'ELIGIBLE_FOR_ACTIVATION';
+    default:
+      return null;
+  }
+}
+
 /**
  * Turns a `ConfirmationService.evaluate` result into the actual state transition (TASK-11 §5's
  * "확정 결과 -> finalizer mapping"). Every transition is a compare-and-swap against the Operation's
@@ -30,10 +63,10 @@ const LOCK_RELEASING_STATUSES = new Set([
  * an error.
  *
  * The CONFIRMED case additionally enqueues TASK-12's completion webhook — in the *same* DB
- * transaction as the ONCHAIN_CONFIRMED transition, the winning-attempt update, and the asset lock
- * release, per TASK-12 §5 ("ONCHAIN_CONFIRMED와 업무 결과를 같은 DB transaction에서 outbox로 만든다"):
- * a crash right after commit still has a durable outbox row for `NotificationDeliveryWorker` to
- * find, even though nothing has been sent yet.
+ * transaction as the ONCHAIN_CONFIRMED transition, the winning-attempt update (now including the
+ * receipt evidence, 검증 D7), the asset lock release, and the raw-transaction ciphertext purge for
+ * every attempt of the Operation (검증 D6 — after final confirmation no re-broadcast or RBF can ever
+ * be needed), per TASK-12 §5 ("ONCHAIN_CONFIRMED와 업무 결과를 같은 DB transaction에서 outbox로 만든다").
  */
 @Injectable()
 export class OperationFinalizer {
@@ -69,16 +102,15 @@ export class OperationFinalizer {
   ): Promise<void> {
     try {
       await this.dataSource.transaction(async (manager) => {
-        const txHash = await this.markWinner(
-          manager,
-          operation.id,
-          result.winningAttemptId,
-          result.blockNumber,
-          result.confirmations,
-        );
+        const txHash = await this.markWinner(manager, operation.id, result);
 
-        const metadataPatch: Record<string, unknown> = { actualOwner: result.actualOwner };
-        const rightsState = this.rightsStateFor(operation.type);
+        const rightsState = rightsStateFor(operation.type);
+        const metadataPatch: Record<string, unknown> = {
+          actualOwner: result.actualOwner,
+          confirmedBlockNumber: result.blockNumber,
+          confirmedBlockHash: result.blockHash,
+          confirmations: result.confirmations,
+        };
         if (rightsState) {
           metadataPatch.rightsState = rightsState;
         }
@@ -100,44 +132,31 @@ export class OperationFinalizer {
           .execute();
 
         await this.assetLockRepository.release(operation.tokenId, manager);
+        await this.purgeRawTransactions(manager, operation.id);
 
         const notificationId = randomUUID();
+        const payload: BlockchainEventPayload = {
+          notificationId,
+          operationId: operation.id,
+          idempotencyKey: operation.idempotencyKey,
+          operationType: operation.type,
+          tokenId: operation.tokenId,
+          finalStatus: 'ONCHAIN_CONFIRMED',
+          finalOwnerAddress: result.actualOwner,
+          txHash,
+          blockNumber: result.blockNumber,
+          blockHash: result.blockHash,
+          confirmations: result.confirmations,
+          serviceRightsState: rightsState,
+          confirmedAt: transitioned.updatedAt.toISOString(),
+        };
         await this.notificationOutboxRepository.enqueue(
-          {
-            notificationId,
-            operationId: operation.id,
-            payload: {
-              notificationId,
-              operationId: operation.id,
-              idempotencyKey: operation.idempotencyKey,
-              type: operation.type,
-              tokenId: operation.tokenId,
-              finalOwner: result.actualOwner,
-              txHash,
-              confirmedAt: transitioned.updatedAt.toISOString(),
-              rightsState: rightsState ?? null,
-            },
-          },
+          { notificationId, operationId: operation.id, payload },
           manager,
         );
       });
     } catch {
       // Already moved by a concurrent pass — nothing left to do.
-    }
-  }
-
-  /** TASK-09 §5: "결과는 EXTERNAL_INACTIVE 또는 ELIGIBLE_FOR_ACTIVATION을 반환하며 Backend 권리를 직접
-   * 변경하지 않는다" — this only ever *reports* a derived state alongside the confirmed transfer;
-   * actually activating/deactivating the associated CUBE service rights remains Backend's job. */
-  private rightsStateFor(type: OperationType): 'EXTERNAL_INACTIVE' | 'ELIGIBLE_FOR_ACTIVATION' | null {
-    switch (type) {
-      case OperationType.WITHDRAWAL:
-        return 'EXTERNAL_INACTIVE';
-      case OperationType.REENTRY:
-      case OperationType.EXTERNAL_RESALE:
-        return 'ELIGIBLE_FOR_ACTIVATION';
-      default:
-        return null;
     }
   }
 
@@ -152,27 +171,36 @@ export class OperationFinalizer {
     if (LOCK_RELEASING_STATUSES.has(nextStatus)) {
       await this.assetLockRepository.release(operation.tokenId);
     }
+    if (nextStatus === OperationStatus.FAILED) {
+      // ALL_ATTEMPTS_REVERTED is final on chain too — nothing left to re-broadcast (검증 D6).
+      await this.purgeRawTransactions(this.dataSource.manager, operation.id);
+    }
   }
 
-  /** Returns the winning attempt's `txHash` for the notification payload. */
+  /** Records the winning attempt's receipt evidence (검증 D7) and supersedes every other attempt of
+   * the Operation. Returns the winner's `txHash` for the notification payload. */
   private async markWinner(
     manager: EntityManager,
     operationId: string,
-    winningAttemptId: string,
-    blockNumber: number,
-    confirmations: number,
+    result: Extract<ConfirmationResult, { outcome: 'CONFIRMED' }>,
   ): Promise<string> {
-    const winner = await manager.findOneOrFail(TransactionAttempt, { where: { id: winningAttemptId } });
+    const winner = await manager.findOneOrFail(TransactionAttempt, {
+      where: { id: result.winningAttemptId },
+    });
 
     await manager
       .createQueryBuilder()
       .update(TransactionAttempt)
       .set({
         status: TransactionAttemptStatus.CONFIRMED,
-        confirmationCount: confirmations,
+        confirmationCount: result.confirmations,
+        receiptBlockNumber: String(result.blockNumber),
+        receiptBlockHash: result.blockHash,
+        receiptStatus: result.receiptStatus,
         checkedAt: () => 'CURRENT_TIMESTAMP(3)',
+        confirmedAt: () => 'CURRENT_TIMESTAMP(3)',
       })
-      .where('id = :id', { id: winningAttemptId })
+      .where('id = :id', { id: result.winningAttemptId })
       .execute();
 
     await manager
@@ -180,13 +208,25 @@ export class OperationFinalizer {
       .update(TransactionAttempt)
       .set({ status: TransactionAttemptStatus.SUPERSEDED })
       .where('operation_id = :operationId', { operationId })
-      .andWhere('id != :winningAttemptId', { winningAttemptId })
+      .andWhere('id != :winningAttemptId', { winningAttemptId: result.winningAttemptId })
       .andWhere('status != :confirmed', { confirmed: TransactionAttemptStatus.CONFIRMED })
       .execute();
 
     this.logger.log(
-      `Operation ${operationId} confirmed at block ${blockNumber} via attempt ${winningAttemptId}`,
+      `Operation ${operationId} confirmed at block ${result.blockNumber} (${result.confirmations} confirmations) via attempt ${result.winningAttemptId}`,
     );
     return winner.txHash;
+  }
+
+  /** 검증 D6: after final on-chain settlement the encrypted signed raw transactions of *every*
+   * attempt are discarded — txHash, nonce, gas and result history stay (TASK-10 §5 불변식). */
+  private async purgeRawTransactions(manager: EntityManager, operationId: string): Promise<void> {
+    await manager
+      .createQueryBuilder()
+      .update(TransactionAttempt)
+      .set({ rawTransactionCiphertext: null, rawTransactionPurgedAt: () => 'CURRENT_TIMESTAMP(3)' })
+      .where('operation_id = :operationId', { operationId })
+      .andWhere('raw_transaction_ciphertext IS NOT NULL')
+      .execute();
   }
 }

@@ -1,0 +1,16 @@
+# Keep the Docker build context to sources only — dependencies are installed and built inside the
+# image (server/Dockerfile). Without this the context was ~800 MB.
+node_modules
+**/node_modules
+**/dist
+**/coverage
+**/artifacts
+**/cache
+**/typechain-types
+.git
+.env
+.env.*
+!.env.example
+reports
+*.log
+.DS_Store

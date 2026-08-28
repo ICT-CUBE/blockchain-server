@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { getAddress, verifyTypedData } from 'ethers';
+import { getAddress } from 'ethers';
 
 import type { ExternalResaleApprovalClaims } from '../../../shared/auth/approval-jwt/approval-jwt-claims';
 import { AppConfigService } from '../../../shared/config/app-config.service';
@@ -10,19 +10,22 @@ import {
   OperationIntakeService,
   type AcceptApprovedMutationResult,
 } from '../../../shared/idempotency/operation-intake.service';
+import { ConsentDryRunService } from '../../transaction/rpc/consent-dry-run.service';
 import { CubeNftReaderService } from '../../transaction/rpc/cube-nft-reader.service';
-import {
-  OWNER_CONSENT_TYPES,
-  OwnerConsentPurpose,
-  ownerConsentDomain,
-} from '../../transaction/signing/owner-consent';
+import { OwnerConsentPurpose, type OwnerConsent } from '../../transaction/signing/owner-consent';
 import { WalletService } from '../../wallet/application/wallet.service';
+import {
+  hashExternalSignature,
+  sealExternalSignature,
+  type StoredExternalConsent,
+} from '../external-consent/stored-consent';
 import type { ExternalResaleRequestBody } from './external-resale-request.schema';
 
 /**
  * TASK-09 §5: External Resale moves a token from a user-controlled external address to the
  * *buyer's* custodial wallet (unlike Reentry, which returns to the same user) — otherwise the same
- * external-signature-verified consent pattern as Reentry.
+ * externally-signed consent pattern as Reentry, including 검증 D3's accept-time dry-run and
+ * 검증 D8's encrypted signature storage.
  */
 @Injectable()
 export class ExternalResaleApplication {
@@ -33,6 +36,7 @@ export class ExternalResaleApplication {
     private readonly operationIntake: OperationIntakeService,
     private readonly cubeNftReader: CubeNftReaderService,
     private readonly appConfig: AppConfigService,
+    private readonly consentDryRun: ConsentDryRunService,
   ) {}
 
   async accept(
@@ -78,11 +82,11 @@ export class ExternalResaleApplication {
       throw new ApiError('CONSENT_EXPIRED', 'The signed OwnerConsent deadline has already passed', 409);
     }
 
-    // Best-effort — see ReentryApplication's identical reasoning.
-    this.warnIfObviouslyWrongSigner(body, resolvedFrom, resolvedTo, deadline);
-
     const ownerCheck = await this.tryReadOwner(body.tokenId);
-    if (ownerCheck.status === 'known' && ownerCheck.owner && getAddress(ownerCheck.owner) !== resolvedFrom) {
+    if (
+      ownerCheck.status === 'known' &&
+      (!ownerCheck.owner || getAddress(ownerCheck.owner) !== resolvedFrom)
+    ) {
       throw new ApiError(
         'EXTERNAL_RESALE_OWNER_MISMATCH',
         `tokenId ${body.tokenId} is not currently owned by ${resolvedFrom}`,
@@ -90,6 +94,18 @@ export class ExternalResaleApplication {
       );
     }
 
+    const consent: OwnerConsent = {
+      tokenId: body.tokenId,
+      currentOwner: resolvedFrom,
+      from: resolvedFrom,
+      to: resolvedTo,
+      purpose: OwnerConsentPurpose.EXTERNAL_RESALE,
+      nonce: BigInt(body.consentNonce),
+      deadline,
+    };
+    await this.consentDryRun.verifyAuthorizedTransfer(consent, body.externalSignature);
+
+    const signatureHash = hashExternalSignature(body.externalSignature);
     const validCommandHash = computeValidCommandHash({
       operation: OperationType.EXTERNAL_RESALE,
       tokenId: body.tokenId,
@@ -99,7 +115,18 @@ export class ExternalResaleApplication {
       to: resolvedTo,
       consentNonce: body.consentNonce,
       consentDeadline: body.consentDeadline,
+      externalSignatureHash: signatureHash,
     });
+
+    const storedConsent: StoredExternalConsent = {
+      consentNonce: body.consentNonce,
+      consentDeadline: body.consentDeadline,
+      externalSignatureCiphertext: sealExternalSignature(
+        this.appConfig.submission.rawTxEncryptionKey,
+        body.externalSignature,
+      ),
+      externalSignatureHash: signatureHash,
+    };
 
     return this.operationIntake.acceptApprovedMutation({
       jti: approval.jti,
@@ -110,48 +137,9 @@ export class ExternalResaleApplication {
         tokenId: body.tokenId,
         fromAddress: resolvedFrom,
         toAddress: resolvedTo,
-        metadata: {
-          tradeId: body.tradeId,
-          consentNonce: body.consentNonce,
-          consentDeadline: body.consentDeadline,
-          externalSignature: body.externalSignature,
-        },
+        metadata: { tradeId: body.tradeId, ...storedConsent },
       },
     });
-  }
-
-  private warnIfObviouslyWrongSigner(
-    body: ExternalResaleRequestBody,
-    resolvedFrom: string,
-    resolvedTo: string,
-    deadline: bigint,
-  ): void {
-    try {
-      const recovered = verifyTypedData(
-        ownerConsentDomain(
-          this.appConfig.cubeNft.deployment.chainId,
-          this.appConfig.cubeNft.deployment.proxyAddress,
-        ),
-        OWNER_CONSENT_TYPES,
-        {
-          tokenId: body.tokenId,
-          currentOwner: resolvedFrom,
-          from: resolvedFrom,
-          to: resolvedTo,
-          purpose: OwnerConsentPurpose.EXTERNAL_RESALE,
-          nonce: BigInt(body.consentNonce),
-          deadline,
-        },
-        body.externalSignature,
-      );
-      if (getAddress(recovered) !== resolvedFrom) {
-        this.logger.warn(
-          `External resale externalSignature for tokenId ${body.tokenId} recovers to ${recovered}, not the expected ${resolvedFrom} — may be a valid ERC-1271 signature, or may be wrong; on-chain verification is authoritative`,
-        );
-      }
-    } catch (error) {
-      this.logger.warn(`Could not recover a signer from externalSignature: ${(error as Error).message}`);
-    }
   }
 
   private async tryReadOwner(
@@ -162,7 +150,7 @@ export class ExternalResaleApplication {
       return { status: 'known', owner };
     } catch (error) {
       this.logger.warn(
-        `Owner pre-check unavailable for tokenId ${tokenId}, proceeding without it: ${(error as Error).message}`,
+        `Owner pre-check unavailable for tokenId ${tokenId}, relying on the consent dry-run: ${(error as Error).message}`,
       );
       return { status: 'unknown' };
     }

@@ -21,6 +21,8 @@ import {
 import { signHmacRequest } from './helpers/hmac-sign';
 import { signApprovalJwt } from './helpers/jwt-sign';
 
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // 검증 §5: metadata images must be real image bytes
+
 const MINTS_PATH = '/internal/v1/mints';
 const WALLETS_PATH = '/internal/v1/wallets';
 const METADATA_PATH = '/internal/v1/metadata';
@@ -100,7 +102,7 @@ describe('TASK-14 audit/failure operator queries (e2e)', () => {
       tokenId,
       cubeNumber: `CUBE-${tokenId}`,
       publicGrade: 'A',
-      imageBase64: Buffer.from(`fixture-image-${tokenId}`).toString('base64'),
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`fixture-image-${tokenId}`)]).toString('base64'),
       benefitReferenceId: `benefit-${tokenId}`,
     });
     const response = await request(server())
@@ -148,10 +150,19 @@ describe('TASK-14 audit/failure operator queries (e2e)', () => {
     const userId = `user-${randomUUID()}`;
     const { operationId, tokenId } = await acceptMint(userId);
 
-    const response = await request(server())
+    // The MINT_ACCEPTED audit write is deliberately fire-and-forget after the 202 (TASK-14 §9), so
+    // poll briefly instead of assuming it already landed.
+    let response = await request(server())
       .get(AUDIT_RECORDS_PATH)
       .query({ operationId })
       .set(operatorHmacFor({ method: 'GET', path: AUDIT_RECORDS_PATH, query: { operationId } }));
+    for (let attempt = 0; attempt < 20 && (response.body as { total: number }).total === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      response = await request(server())
+        .get(AUDIT_RECORDS_PATH)
+        .query({ operationId })
+        .set(operatorHmacFor({ method: 'GET', path: AUDIT_RECORDS_PATH, query: { operationId } }));
+    }
 
     expect(response.status).toBe(200);
     const body = response.body as { items: Array<Record<string, unknown>>; total: number };
@@ -178,8 +189,8 @@ describe('TASK-14 audit/failure operator queries (e2e)', () => {
         }),
       );
 
-    expect(response.status).toBe(401);
-    expect(response.body).toMatchObject({ code: 'HMAC_UNKNOWN_KEY' });
+    expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ code: 'HMAC_SCOPE_FORBIDDEN' });
   });
 
   it('rejects the mint endpoint when signed with the operator (non-inbound) key', async () => {
@@ -205,8 +216,8 @@ describe('TASK-14 audit/failure operator queries (e2e)', () => {
       )
       .send(bodyString);
 
-    expect(response.status).toBe(401);
-    expect(response.body).toMatchObject({ code: 'HMAC_UNKNOWN_KEY' });
+    expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ code: 'HMAC_SCOPE_FORBIDDEN' });
   });
 
   it('returns an empty failures page and 404s resolving a non-existent failure record', async () => {
