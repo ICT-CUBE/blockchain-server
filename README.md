@@ -18,10 +18,10 @@ npm workspaces 기반 모노레포:
 - `transaction` — nonce 조정, 서명·제출, RBF, confirmation, reconciliation, RPC
 - `operation` — Operation 상태 기계, 잠금(AssetLock), 완결(Finalizer)
 - `notification` — Backend 완료 webhook outbox·전달
-- `metadata` — Pinata/NFT.Storage pinning/preservation (fake/real 어댑터)
+- `metadata` — Pinata(hot pin) + Filebase(장기 보존) pinning/preservation (fake/real 어댑터)
 - `audit` — 감사/실패 기록(`AuditWriter`), 운영자 조회 API
 
-모든 외부 연동(Web3Auth, Pinata, NFT.Storage)은 `provider=fake|real` 환경변수로 전환되는 어댑터 포트 패턴을 따른다 — `fake`는 credential 없이 전체 파이프라인을 로컬에서 실행 가능하게 하는 결정적(deterministic) 구현이다.
+모든 외부 연동(Web3Auth, Pinata, Filebase)은 `provider=fake|real` 환경변수로 전환되는 어댑터 포트 패턴을 따른다 — `fake`는 credential 없이 전체 파이프라인을 로컬에서 실행 가능하게 하는 결정적(deterministic) 구현이다.
 
 ## 요구 사항
 
@@ -106,6 +106,8 @@ npm run deploy:amoy --workspace=contracts/cube-nft
 - **문제 2** 통합 스펙마다 공유 자원(고정 Hardhat signer·MySQL)의 휘발성 테이블을 파일 실행 전 초기화(`test/integration/reset-db-between-files.ts`, `setupFilesAfterEnv`) → 한 스펙의 실패가 뒤 스펙을 signer halt로 연쇄 실패시키지 않음. `test:integration`은 UTC·KST MySQL에서 반복 실행해도 63/63.
 - **문제 3** `deploy:localhost`(= `--network localhost`) 스크립트 추가 — README가 `deploy:local`에 `--network`를 중복 전달해 `HHE510`으로 실패하던 문제 수정.
 - **OpenAPI 계약 테스트 공백** OpenAPI 명세를 저장소 안(`code/openapi.yaml`)으로 옮기고 `openapi-contract.e2e-spec.ts`가 그 파일을 읽도록 수정. 이전에는 비버전관리 `docs/openapi.yaml`을 찾다가 문서 재배치로 파일을 못 찾으면 **8개 테스트가 assertion 없이 통과**(silent skip)하던 상태였음 — 파일 부재 시 이제 suite가 실패한다. 명세는 실제 구현과 대조 검증됨(v1.1.0, 8/8 실질 통과).
+- **민감정보 스캐너 오탐** `scan:sensitive`의 `POSSIBLE_KEY_32B`(0x+64hex)는 keccak256 해시와 형태가 같고 SQL dump는 컬럼 문맥을 잃어 `tx_hash`를 매번 키로 오탐 → advisory로 강등(출력엔 남되 exit code 미반영), `--strict`로 로그 스캔 시 재게이팅. 실제 키 유출은 `--secret-env` 정확 일치로 탐지.
+- **NFT.Storage 폐기 → Filebase** 장기 보존 어댑터를 NFT.Storage(Classic pinning API 2024-06-30 폐기)에서 **Filebase**로 교체. 둘 다 표준 IPFS Pinning Service API(`POST /pins {cid,name}`, Bearer)라 엔드포인트·토큰만 바뀜. `NFT_STORAGE_TOKEN` → `FILEBASE_PIN_TOKEN`(+ `FILEBASE_PIN_ENDPOINT`, 기본 `https://api.filebase.io/v1/ipfs`). 보존은 여전히 best-effort(Mint 비차단).
 
 ## 문서
 

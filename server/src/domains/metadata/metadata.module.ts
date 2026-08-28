@@ -1,4 +1,4 @@
-import { Logger, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 
 import { HmacAuthModule } from '../../shared/auth/hmac/hmac-auth.module';
 import { AppConfigService } from '../../shared/config/app-config.service';
@@ -9,12 +9,15 @@ import { MetadataController } from './http/metadata.controller';
 import { MetadataPersistenceModule } from './persistence/metadata-persistence.module';
 import { FakePinningAdapter } from './providers/fake-pinning.adapter';
 import { FakePreservationAdapter } from './providers/fake-preservation.adapter';
-import { NftStoragePreservationAdapter } from './providers/nft-storage-preservation.adapter';
+import { FilebasePreservationAdapter } from './providers/filebase-preservation.adapter';
 import { PinataPinningAdapter } from './providers/pinata-pinning.adapter';
 
 // `METADATA_PROVIDER` (default "fake") selects the binding at boot — same pattern as
 // TASK-05's WalletModule. Whichever adapter isn't selected is never called, so leaving
-// METADATA_PROVIDER=fake costs nothing even with real Pinata/NFT.Storage credentials also set.
+// METADATA_PROVIDER=fake costs nothing even with real Pinata/Filebase credentials also set.
+// "real" = Pinata for hot pinning + Filebase for long-term preservation. Filebase replaced
+// NFT.Storage, whose Classic pinning API was decommissioned 2024-06-30 — both speak the same
+// standard IPFS Pinning Service API (`POST /pins {cid,name}`), so the swap is endpoint + token.
 @Module({
   imports: [HmacAuthModule, MetadataPersistenceModule],
   controllers: [MetadataController],
@@ -23,7 +26,7 @@ import { PinataPinningAdapter } from './providers/pinata-pinning.adapter';
     FakePinningAdapter,
     PinataPinningAdapter,
     FakePreservationAdapter,
-    NftStoragePreservationAdapter,
+    FilebasePreservationAdapter,
     {
       provide: PINNING_PORT,
       inject: [AppConfigService, FakePinningAdapter, PinataPinningAdapter],
@@ -32,25 +35,12 @@ import { PinataPinningAdapter } from './providers/pinata-pinning.adapter';
     },
     {
       provide: PRESERVATION_PORT,
-      inject: [AppConfigService, FakePreservationAdapter, NftStoragePreservationAdapter],
+      inject: [AppConfigService, FakePreservationAdapter, FilebasePreservationAdapter],
       useFactory: (
         config: AppConfigService,
         fake: FakePreservationAdapter,
-        real: NftStoragePreservationAdapter,
-      ) => {
-        if (config.metadata.provider === 'real') {
-          // NFT.Storage Classic is decommissioned. Preservation is best-effort so
-          // Mint still works on Pinata's hot pin alone, but NFR-011's dual preservation is not met
-          // until PreservationPort is rebound to a live provider.
-          new Logger('MetadataModule').warn(
-            'METADATA_PROVIDER=real: long-term preservation is UNAVAILABLE — the NFT.Storage ' +
-              'Classic API was decommissioned 2024-06-30. Metadata has a single copy (Pinata) ' +
-              'only. Rebind PreservationPort to Lighthouse/Storacha/Filebase to restore NFR-011.',
-          );
-          return real;
-        }
-        return fake;
-      },
+        real: FilebasePreservationAdapter,
+      ) => (config.metadata.provider === 'real' ? real : fake),
     },
   ],
   exports: [MetadataService],

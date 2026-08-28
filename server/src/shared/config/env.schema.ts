@@ -135,12 +135,17 @@ const baseEnvSchema = z.object({
 
   /** TASK-13: "fake" (default) is a deterministic, content-addressed local stand-in — always
    * available, no external credentials, real enough to test the whole pipeline (dependency
-   * tracking, READY gating, tokenURI) against. "real" binds the actual Pinata/NFT.Storage
-   * adapters; see PinataPinningAdapter/NftStoragePreservationAdapter for exactly what that then
-   * requires. */
+   * tracking, READY gating, tokenURI) against. "real" binds the actual hot-pin (Pinata) and
+   * long-term-preservation (Filebase) adapters; see PinataPinningAdapter/FilebasePreservationAdapter
+   * for exactly what that then requires. (Filebase replaced NFT.Storage, whose Classic pinning API
+   * was decommissioned 2024-06-30.) */
   METADATA_PROVIDER: z.enum(['fake', 'real']).default('fake'),
   PINATA_JWT: z.string().min(1).optional(),
-  NFT_STORAGE_TOKEN: z.string().min(1).optional(),
+  /** Filebase per-bucket access token for the standard IPFS Pinning Service API
+   * (`POST https://api.filebase.io/v1/ipfs/pins`). Preservation is by reference — the CID is
+   * already hot-pinned on Pinata, Filebase is asked to durably keep a second, independent copy. */
+  FILEBASE_PIN_TOKEN: z.string().min(1).optional(),
+  FILEBASE_PIN_ENDPOINT: z.string().url().default('https://api.filebase.io/v1/ipfs'),
   METADATA_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
   /** Maximum decoded image size accepted by `POST /internal/v1/metadata` (Blockchain Server
    * uploads the image itself — 검증 개선안 §5 option 2 — so it must bound the bytes it accepts). */
@@ -211,9 +216,9 @@ export const envSchema = baseEnvSchema
     message: 'PINATA_JWT is required when METADATA_PROVIDER=real',
     path: ['PINATA_JWT'],
   })
-  .refine((env) => env.METADATA_PROVIDER !== 'real' || Boolean(env.NFT_STORAGE_TOKEN), {
-    message: 'NFT_STORAGE_TOKEN is required when METADATA_PROVIDER=real',
-    path: ['NFT_STORAGE_TOKEN'],
+  .refine((env) => env.METADATA_PROVIDER !== 'real' || Boolean(env.FILEBASE_PIN_TOKEN), {
+    message: 'FILEBASE_PIN_TOKEN is required when METADATA_PROVIDER=real',
+    path: ['FILEBASE_PIN_TOKEN'],
   })
   .refine(
     (env) => Boolean(env.HMAC_OPERATOR_PREVIOUS_KEY_ID) === Boolean(env.HMAC_OPERATOR_PREVIOUS_KEY_SECRET),

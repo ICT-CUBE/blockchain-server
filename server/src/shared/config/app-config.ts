@@ -87,7 +87,8 @@ export interface HmacOutboundConfig {
 export interface MetadataConfig {
   readonly provider: 'fake' | 'real';
   readonly pinataJwt: string | null;
-  readonly nftStorageToken: string | null;
+  readonly filebasePinToken: string | null;
+  readonly filebasePinEndpoint: string;
   readonly httpTimeoutMs: number;
   readonly imageMaxBytes: number;
 }
@@ -239,7 +240,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     metadata: Object.freeze({
       provider: parsedEnv.METADATA_PROVIDER,
       pinataJwt: parsedEnv.PINATA_JWT ?? null,
-      nftStorageToken: parsedEnv.NFT_STORAGE_TOKEN ?? null,
+      filebasePinToken: parsedEnv.FILEBASE_PIN_TOKEN ?? null,
+      filebasePinEndpoint: parsedEnv.FILEBASE_PIN_ENDPOINT,
       httpTimeoutMs: parsedEnv.METADATA_HTTP_TIMEOUT_MS,
       imageMaxBytes: parsedEnv.METADATA_IMAGE_MAX_BYTES,
     }),
