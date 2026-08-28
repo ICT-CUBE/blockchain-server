@@ -25,6 +25,8 @@ export class MetadataController {
   @Get(':tokenId')
   @HttpCode(200)
   async status(@Param('tokenId', ParseIntPipe) tokenId: number): Promise<MetadataStatusResponse> {
+    // Refresh any PENDING preservation pins against the provider before reporting (검증 문제 2).
+    await this.metadataService.reconcilePreservation(tokenId);
     const [ready, tokenUri, dependencies] = await Promise.all([
       this.metadataService.isReady(tokenId),
       this.metadataService.tokenUri(tokenId),
@@ -39,6 +41,7 @@ export class MetadataController {
         kind: dep.kind,
         pinStatus: dep.pinStatus,
         preservationStatus: dep.preservationStatus,
+        preservationRequestId: dep.preservationRequestId,
       })),
     };
   }

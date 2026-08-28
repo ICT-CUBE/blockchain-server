@@ -7,11 +7,23 @@ export interface PreserveRequest {
   tokenId: number;
 }
 
-/** Long-term preservation *by reference* — asks a separate archival provider to fetch and durably
- * store content already hot-pinned (and therefore publicly fetchable over IPFS) under `cid`, per
- * the standard IPFS "Pinning Service API" shape real providers implement (TASK-13 §4/§5 —
- * NFT.Storage's role, deliberately independent of Pinata's hot-pinning availability: §12's risk
- * "NFT.Storage가 hot pinning과 다른 SLA"). Never receives raw bytes — that is Pinata's job. */
+/** The four states a pin can be in, per the standard IPFS Pinning Service API. `preserve()` only
+ * gets you as far as `queued` — the content is durably stored only once `checkStatus` reports
+ * `pinned`. */
+export type PreservationPinState = 'queued' | 'pinning' | 'pinned' | 'failed';
+
+/**
+ * Long-term preservation *by reference* — asks a separate archival provider (Filebase) to fetch and
+ * durably store content already hot-pinned by Pinata (and therefore publicly fetchable over IPFS)
+ * under `cid`, via the standard IPFS "Pinning Service API" (`POST /pins`). Deliberately independent
+ * of Pinata's hot-pinning availability (NFR-011 "이중 보존"). Never receives raw bytes — that is
+ * Pinata's job.
+ *
+ * The pin is asynchronous: `preserve()` returns a `requestId` for a `queued` request; the caller
+ * must persist it and later poll `checkStatus(requestId)` before treating the content as PRESERVED
+ * (검증 문제 2·3).
+ */
 export interface PreservationPort {
-  preserve(request: PreserveRequest): Promise<{ evidenceId: string }>;
+  preserve(request: PreserveRequest): Promise<{ requestId: string }>;
+  checkStatus(requestId: string): Promise<PreservationPinState>;
 }

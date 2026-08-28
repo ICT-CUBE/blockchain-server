@@ -29,22 +29,38 @@ interface Captured {
   url: string;
   method?: string;
   authorization?: string;
+  hasContentType: boolean;
   body: unknown;
 }
 
-/** Installs a `global.fetch` stub returning `res`, and captures the first call's args. */
-function stubFetch(res: Response): { captured: Captured | null } {
-  const state: { captured: Captured | null } = { captured: null };
+interface FetchState {
+  calls: Captured[];
+  readonly first: Captured;
+}
+
+function stubFetch(res: Response): FetchState {
+  const calls: Captured[] = [];
   global.fetch = ((url: string, init: RequestInit = {}) => {
-    state.captured = {
+    const headers = (init.headers as Record<string, string> | undefined) ?? {};
+    calls.push({
       url,
       method: init.method,
-      authorization: (init.headers as Record<string, string> | undefined)?.Authorization,
+      authorization: headers.Authorization,
+      hasContentType: 'Content-Type' in headers,
       body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body,
-    };
+    });
     return Promise.resolve(res);
   }) as unknown as typeof fetch;
-  return state;
+  return {
+    calls,
+    get first(): Captured {
+      const call = calls[0];
+      if (!call) {
+        throw new Error('fetch was never called');
+      }
+      return call;
+    },
+  };
 }
 
 const request: PreserveRequest = {
@@ -64,33 +80,53 @@ describe('FilebasePreservationAdapter', () => {
     const state = stubFetch(response({ ok: true, status: 200 }));
     const adapter = new FilebasePreservationAdapter(configWith({ filebasePinToken: null }));
     await expect(adapter.preserve(request)).rejects.toBeInstanceOf(FilebaseNotConfiguredError);
-    expect(state.captured).toBeNull();
+    expect(state.calls).toHaveLength(0);
   });
 
-  it('POSTs {cid,name} to <endpoint>/pins with a Bearer token and returns requestid as evidence', async () => {
-    const state = stubFetch(response({ ok: true, status: 202, body: { requestid: 'req_abc' } }));
+  it('preserve() POSTs {cid} (no name) to <endpoint>/pins with a Bearer token, returns requestid', async () => {
+    const state = stubFetch(
+      response({ ok: true, status: 202, body: { requestid: 'req_abc', status: 'queued' } }),
+    );
 
     const result = await new FilebasePreservationAdapter(configWith({})).preserve(request);
 
-    expect(result).toEqual({ evidenceId: 'req_abc' });
-    expect(state.captured).toEqual({
+    expect(result).toEqual({ requestId: 'req_abc' });
+    expect(state.first).toEqual({
       url: 'https://api.filebase.io/v1/ipfs/pins',
       method: 'POST',
       authorization: 'Bearer tok_test',
-      body: { cid: request.cid, name: 'cube-421' },
+      hasContentType: true,
+      body: { cid: request.cid }, // no `name` — Filebase 409 is a name conflict (검증 문제 1)
     });
   });
 
-  it('treats HTTP 409 (already pinned on this bucket) as idempotent success', async () => {
-    stubFetch(response({ ok: false, status: 409 }));
-    const result = await new FilebasePreservationAdapter(configWith({})).preserve(request);
-    expect(result).toEqual({ evidenceId: `filebase:${request.cid}` });
+  it('preserve() does NOT treat 409 as success — it throws like any other non-2xx (검증 문제 1)', async () => {
+    stubFetch(response({ ok: false, status: 409, text: 'NAMING CONFLICT' }));
+    await expect(new FilebasePreservationAdapter(configWith({})).preserve(request)).rejects.toThrow(
+      /Filebase POST \/pins failed: HTTP 409/,
+    );
   });
 
-  it('rejects on any other non-2xx with the status in the message', async () => {
-    stubFetch(response({ ok: false, status: 401, text: 'bad token' }));
+  it('preserve() throws when the response has no requestid', async () => {
+    stubFetch(response({ ok: true, status: 202, body: { status: 'queued' } }));
     await expect(new FilebasePreservationAdapter(configWith({})).preserve(request)).rejects.toThrow(
-      /Filebase \/pins failed: HTTP 401/,
+      /did not include a requestid/,
+    );
+  });
+
+  it('checkStatus() GETs /pins/{requestId} and returns the pin state', async () => {
+    const state = stubFetch(response({ ok: true, status: 200, body: { status: 'pinned' } }));
+    const result = await new FilebasePreservationAdapter(configWith({})).checkStatus('req abc/1');
+    expect(result).toBe('pinned');
+    expect(state.first.method).toBe('GET');
+    expect(state.first.url).toBe('https://api.filebase.io/v1/ipfs/pins/req%20abc%2F1');
+    expect(state.first.hasContentType).toBe(false);
+  });
+
+  it('checkStatus() rejects an unexpected status value', async () => {
+    stubFetch(response({ ok: true, status: 200, body: { status: 'exploded' } }));
+    await expect(new FilebasePreservationAdapter(configWith({})).checkStatus('req')).rejects.toThrow(
+      /unexpected status: exploded/,
     );
   });
 
@@ -99,6 +135,6 @@ describe('FilebasePreservationAdapter', () => {
     await new FilebasePreservationAdapter(
       configWith({ filebasePinEndpoint: 'https://ipfs.filebase.io/v1/ipfs/' }),
     ).preserve(request);
-    expect(state.captured?.url).toBe('https://ipfs.filebase.io/v1/ipfs/pins');
+    expect(state.first.url).toBe('https://ipfs.filebase.io/v1/ipfs/pins');
   });
 });

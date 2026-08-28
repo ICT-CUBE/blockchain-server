@@ -14,5 +14,6 @@ export interface MetadataStatusResponse {
     kind: string;
     pinStatus: string;
     preservationStatus: string;
+    preservationRequestId: string | null;
   }[];
 }

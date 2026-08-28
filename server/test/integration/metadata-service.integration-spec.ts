@@ -7,7 +7,11 @@ import { MetadataService } from '../../src/domains/metadata/application/metadata
 import { FakePinningAdapter } from '../../src/domains/metadata/providers/fake-pinning.adapter';
 import { FakePreservationAdapter } from '../../src/domains/metadata/providers/fake-preservation.adapter';
 import type { PinningPort } from '../../src/domains/metadata/application/pinning.port';
-import type { PreservationPort } from '../../src/domains/metadata/application/preservation.port';
+import type {
+  PreservationPinState,
+  PreservationPort,
+  PreserveRequest,
+} from '../../src/domains/metadata/application/preservation.port';
 import {
   MetadataDependency,
   MetadataDependencyKind,
@@ -41,10 +45,38 @@ function setEnv(): void {
   process.env.HMAC_OUTBOUND_KEY_SECRET = Buffer.alloc(32, 26).toString('base64url');
 }
 
-/** Always fails preserve() — for exercising provider-failure isolation. */
+/** Always fails preserve() — for exercising archival-provider-failure isolation. */
 class FailingPreservationAdapter implements PreservationPort {
-  preserve(): Promise<{ evidenceId: string }> {
-    return Promise.reject(new Error('simulated NFT.Storage outage'));
+  preserve(): Promise<{ requestId: string }> {
+    return Promise.reject(new Error('simulated preservation-provider outage'));
+  }
+
+  checkStatus(): Promise<PreservationPinState> {
+    return Promise.reject(new Error('simulated preservation-provider outage'));
+  }
+}
+
+/** Records every preserve() call and lets the test drive checkStatus() per requestId — so the
+ * async lifecycle (queued → pinned/failed) can be asserted deterministically (검증 문제 1·2). */
+class RecordingPreservationAdapter implements PreservationPort {
+  readonly preserved: PreserveRequest[] = [];
+  private readonly states = new Map<string, PreservationPinState>();
+
+  constructor(private readonly initialState: PreservationPinState = 'queued') {}
+
+  preserve(request: PreserveRequest): Promise<{ requestId: string }> {
+    this.preserved.push(request);
+    const requestId = `req-${request.cid}`;
+    this.states.set(requestId, this.initialState);
+    return Promise.resolve({ requestId });
+  }
+
+  checkStatus(requestId: string): Promise<PreservationPinState> {
+    return Promise.resolve(this.states.get(requestId) ?? 'failed');
+  }
+
+  setState(cid: string, state: PreservationPinState): void {
+    this.states.set(`req-${cid}`, state);
   }
 }
 
@@ -141,9 +173,71 @@ describe('MetadataService (integration, real DB)', () => {
 
     const deps = await dataSource.getRepository(MetadataDependency).find({ where: { tokenId } });
     expect(deps.every((dep) => dep.pinStatus === MetadataPinStatus.PINNED)).toBe(true);
+    // fake provider reports `pinned` immediately, so the end-of-prepare reconcile promotes both.
     expect(deps.every((dep) => dep.preservationStatus === MetadataPreservationStatus.PRESERVED)).toBe(true);
+    expect(deps.every((dep) => dep.preservationRequestId !== null)).toBe(true);
     expect(deps.some((dep) => dep.kind === MetadataDependencyKind.METADATA_JSON)).toBe(true);
     expect(deps.some((dep) => dep.kind === MetadataDependencyKind.IMAGE)).toBe(true);
+  });
+
+  it('submits the image and metadata CIDs as two distinct preservation requests (검증 문제 1)', async () => {
+    const recording = new RecordingPreservationAdapter('queued');
+    const service = makeService(new FakePinningAdapter(), recording);
+    const tokenId = randomTokenId();
+
+    const result = await service.prepare({
+      tokenId,
+      cubeNumber: `CUBE-${tokenId}`,
+      publicGrade: 'A',
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`image-${tokenId}`)]).toString('base64'),
+      benefitReferenceId: `benefit-${tokenId}`,
+    });
+
+    const cids = recording.preserved.map((r) => r.cid).sort();
+    expect(cids).toHaveLength(2);
+    expect(new Set(cids).size).toBe(2); // image CID and metadata CID are different requests
+    expect(cids).toContain(result.metadataCid);
+
+    // Every dependency has a stored requestId; none is PRESERVED yet (provider still `queued`).
+    const deps = await dataSource.getRepository(MetadataDependency).find({ where: { tokenId } });
+    expect(deps.every((dep) => dep.preservationRequestId !== null)).toBe(true);
+    expect(deps.every((dep) => dep.preservationStatus === MetadataPreservationStatus.PENDING)).toBe(true);
+  });
+
+  it('keeps preservation PENDING while queued, promotes to PRESERVED only after checkStatus says pinned, FAILED on failed (검증 문제 2)', async () => {
+    const recording = new RecordingPreservationAdapter('queued');
+    const service = makeService(new FakePinningAdapter(), recording);
+    const tokenId = randomTokenId();
+
+    const result = await service.prepare({
+      tokenId,
+      cubeNumber: `CUBE-${tokenId}`,
+      publicGrade: 'A',
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`image-${tokenId}`)]).toString('base64'),
+      benefitReferenceId: `benefit-${tokenId}`,
+    });
+    const repo = dataSource.getRepository(MetadataDependency);
+    const imageCid = (await repo.findOneOrFail({ where: { tokenId, kind: MetadataDependencyKind.IMAGE } }))
+      .cid;
+
+    // Still queued → still PENDING after a reconcile.
+    await service.reconcilePreservation(tokenId);
+    expect(
+      (await repo.find({ where: { tokenId } })).every(
+        (d) => d.preservationStatus === MetadataPreservationStatus.PENDING,
+      ),
+    ).toBe(true);
+
+    // Provider finishes: image pinned, metadata JSON failed.
+    recording.setState(imageCid, 'pinned');
+    recording.setState(result.metadataCid, 'failed');
+    await service.reconcilePreservation(tokenId);
+
+    const byKind = new Map(
+      (await repo.find({ where: { tokenId } })).map((d) => [d.kind, d.preservationStatus]),
+    );
+    expect(byKind.get(MetadataDependencyKind.IMAGE)).toBe(MetadataPreservationStatus.PRESERVED);
+    expect(byKind.get(MetadataDependencyKind.METADATA_JSON)).toBe(MetadataPreservationStatus.FAILED);
   });
 
   it('does not reach READY if the image dependency fails to pin, even though the metadata JSON step never runs', async () => {
@@ -166,7 +260,7 @@ describe('MetadataService (integration, real DB)', () => {
     expect(await service.tokenUri(tokenId)).toBeNull();
   });
 
-  it('isolates a preservation-provider failure from pin status — READY is unaffected by NFT.Storage being down', async () => {
+  it('isolates an archival-provider failure from pin status — READY is unaffected when preservation is down', async () => {
     const service = makeService(new FakePinningAdapter(), new FailingPreservationAdapter());
     const tokenId = randomTokenId();
 
@@ -181,6 +275,8 @@ describe('MetadataService (integration, real DB)', () => {
     expect(result.ready).toBe(true); // pinning succeeded, so still READY...
     const deps = await dataSource.getRepository(MetadataDependency).find({ where: { tokenId } });
     expect(deps.every((dep) => dep.pinStatus === MetadataPinStatus.PINNED)).toBe(true);
-    expect(deps.every((dep) => dep.preservationStatus === MetadataPreservationStatus.FAILED)).toBe(true); // ...even though preservation failed
+    // ...even though every preservation submission failed outright.
+    expect(deps.every((dep) => dep.preservationStatus === MetadataPreservationStatus.FAILED)).toBe(true);
+    expect(deps.every((dep) => dep.preservationRequestId === null)).toBe(true);
   });
 });

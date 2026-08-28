@@ -595,12 +595,15 @@ components:
           type: array
           items:
             type: object
-            required: [cid, kind, pinStatus, preservationStatus]
+            required: [cid, kind, pinStatus, preservationStatus, preservationRequestId]
             properties:
               cid: {type: string}
               kind: {type: string, enum: [METADATA_JSON, IMAGE]}
               pinStatus: {type: string, enum: [PENDING, PINNED, FAILED]}
               preservationStatus: {type: string, enum: [PENDING, PRESERVED, FAILED]}
+              # Archival provider (Filebase) pin-request id. preservationStatus stays PENDING until a
+              # GET /pins/{id} check reports the pin actually `pinned`. Null if the submission failed.
+              preservationRequestId: {type: [string, 'null']}
     MintRequest:
       type: object
       additionalProperties: false

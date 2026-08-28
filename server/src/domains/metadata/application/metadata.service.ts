@@ -13,7 +13,7 @@ import {
 } from '../persistence/metadata-dependency.entity';
 import { decodeAndValidateImage } from '../image-validation';
 import { PINNING_PORT, type PinningPort } from './pinning.port';
-import { PRESERVATION_PORT, type PreservationPort } from './preservation.port';
+import { PRESERVATION_PORT, type PreservationPinState, type PreservationPort } from './preservation.port';
 import type { PrepareMetadataRequest } from '../metadata-request.schema';
 
 export interface PrepareMetadataResult {
@@ -82,12 +82,15 @@ export class MetadataService {
       canonicalBytes,
     );
 
-    // Best-effort, isolated from the pin path entirely (TASK-13 §12: NFT.Storage's SLA is
-    // deliberately independent of Pinata's — a preservation failure never blocks READY).
+    // Best-effort, isolated from the pin path entirely (TASK-13 §12: the archival provider's SLA is
+    // deliberately independent of Pinata's — a preservation failure never blocks READY). Each CID
+    // gets its own pin request (검증 문제 1); the request only reaches PRESERVED once the provider
+    // confirms `pinned`, which `reconcilePreservation` checks (검증 문제 2).
     await Promise.all([
       this.tryPreserve(input.tokenId, imageCid),
       this.tryPreserve(input.tokenId, metadataCid),
     ]);
+    await this.reconcilePreservation(input.tokenId);
 
     const ready = await this.isReady(input.tokenId);
     return { tokenId: input.tokenId, metadataCid, tokenUri: `ipfs://${metadataCid}`, ready };
@@ -116,6 +119,43 @@ export class MetadataService {
 
   async listDependencies(tokenId: number): Promise<MetadataDependency[]> {
     return this.dataSource.getRepository(MetadataDependency).find({ where: { tokenId } });
+  }
+
+  /**
+   * Best-effort refresh of `preservation_status` for every still-`PENDING` dependency of `tokenId`
+   * that has a `preservation_request_id`: asks the provider whether the pin is `pinned`/`failed`
+   * yet, leaving it `PENDING` while it is still `queued`/`pinning` or the provider is unreachable
+   * (검증 문제 2). Called at the end of `prepare()` and on every `GET /internal/v1/metadata/:id`.
+   */
+  async reconcilePreservation(tokenId: number): Promise<void> {
+    const pending = await this.dataSource.getRepository(MetadataDependency).find({
+      where: { tokenId, preservationStatus: MetadataPreservationStatus.PENDING },
+    });
+    await Promise.all(
+      pending
+        .filter((dep) => dep.preservationRequestId !== null)
+        .map((dep) => this.refreshOnePreservation(dep)),
+    );
+  }
+
+  private async refreshOnePreservation(dep: MetadataDependency): Promise<void> {
+    let state: PreservationPinState;
+    try {
+      state = await this.preservation.checkStatus(dep.preservationRequestId as string);
+    } catch (error) {
+      this.logger.warn(
+        `Preservation status check failed for tokenId ${dep.tokenId} cid ${dep.cid}: ${(error as Error).message}`,
+      );
+      return; // leave PENDING — a later call retries
+    }
+    if (state !== 'pinned' && state !== 'failed') {
+      return; // queued / pinning — still in progress
+    }
+    await this.setPreservationStatus(
+      dep.tokenId,
+      dep.cid,
+      state === 'pinned' ? MetadataPreservationStatus.PRESERVED : MetadataPreservationStatus.FAILED,
+    );
   }
 
   private async recordDependency(
@@ -151,9 +191,12 @@ export class MetadataService {
     }
   }
 
+  /** Submits one CID for preservation and stores the provider's request id. Status stays `PENDING`
+   * — a `queued` pin is *accepted*, not *stored*; `reconcilePreservation` promotes it to `PRESERVED`
+   * only once the provider confirms `pinned` (검증 문제 2·3). A submission error is terminal `FAILED`. */
   private async tryPreserve(tokenId: number, cid: string): Promise<void> {
     try {
-      await this.preservation.preserve({
+      const { requestId } = await this.preservation.preserve({
         cid,
         chainId: this.appConfig.cubeNft.deployment.chainId,
         contractAddress: this.appConfig.cubeNft.deployment.proxyAddress,
@@ -162,19 +205,27 @@ export class MetadataService {
       await this.dataSource
         .createQueryBuilder()
         .update(MetadataDependency)
-        .set({ preservationStatus: MetadataPreservationStatus.PRESERVED })
+        .set({ preservationRequestId: requestId })
         .where('token_id = :tokenId', { tokenId })
         .andWhere('cid = :cid', { cid })
         .execute();
     } catch (error) {
       this.logger.warn(`Preservation failed for tokenId ${tokenId} cid ${cid}: ${(error as Error).message}`);
-      await this.dataSource
-        .createQueryBuilder()
-        .update(MetadataDependency)
-        .set({ preservationStatus: MetadataPreservationStatus.FAILED })
-        .where('token_id = :tokenId', { tokenId })
-        .andWhere('cid = :cid', { cid })
-        .execute();
+      await this.setPreservationStatus(tokenId, cid, MetadataPreservationStatus.FAILED);
     }
+  }
+
+  private async setPreservationStatus(
+    tokenId: number,
+    cid: string,
+    status: MetadataPreservationStatus,
+  ): Promise<void> {
+    await this.dataSource
+      .createQueryBuilder()
+      .update(MetadataDependency)
+      .set({ preservationStatus: status })
+      .where('token_id = :tokenId', { tokenId })
+      .andWhere('cid = :cid', { cid })
+      .execute();
   }
 }

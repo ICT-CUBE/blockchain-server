@@ -1,10 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
 import { AppConfigService } from '../../../shared/config/app-config.service';
-import type { PreservationPort, PreserveRequest } from '../application/preservation.port';
+import type {
+  PreservationPinState,
+  PreservationPort,
+  PreserveRequest,
+} from '../application/preservation.port';
 
-/** Thrown by `preserve` when `FILEBASE_PIN_TOKEN` is missing — see `PinataNotConfiguredError`'s
- * identical reasoning. */
+/** Thrown by `preserve`/`checkStatus` when `FILEBASE_PIN_TOKEN` is missing — see
+ * `PinataNotConfiguredError`'s identical reasoning. */
 export class FilebaseNotConfiguredError extends Error {
   constructor() {
     super('Filebase adapter is selected but FILEBASE_PIN_TOKEN is not set — see .env.example.');
@@ -12,24 +16,46 @@ export class FilebaseNotConfiguredError extends Error {
   }
 }
 
+const PIN_STATES: readonly PreservationPinState[] = ['queued', 'pinning', 'pinned', 'failed'];
+
 /**
- * Real adapter over **Filebase's IPFS Pinning Service API** (`POST {FILEBASE_PIN_ENDPOINT}/pins`,
+ * Real adapter over **Filebase's IPFS Pinning Service API** (`{FILEBASE_PIN_ENDPOINT}/pins`,
  * per-bucket Bearer token — the vendor-agnostic IPFS "Pinning Service API" spec). Replaces the
- * NFT.Storage adapter, whose Classic pinning API was decommissioned 2024-06-30 (개선안-2 §2).
+ * NFT.Storage adapter, whose Classic pinning API was decommissioned 2024-06-30.
  *
- * Preservation is **by reference**: the CID is already hot-pinned on Pinata (and therefore fetchable
- * over the public IPFS network), so this only asks Filebase to fetch and durably keep a second,
- * independent copy — the port never carries raw bytes (TASK-13 §4/§5, NFR-011's "이중 보존" with an
- * SLA deliberately independent of Pinata's). Best-effort: `MetadataService.tryPreserve` swallows any
- * failure and Mint READY never depends on it.
+ * Preservation is **by reference** (the CID is already hot-pinned on Pinata) and **asynchronous**:
+ *
+ *  - `preserve()` POSTs `{ cid }` (no `name` — it is optional, and reusing one across a token's
+ *    image + metadata CIDs would collide: Filebase's 409 is a *name* conflict, 검증 문제 1) and
+ *    returns Filebase's `requestid`. HTTP 202 + `status: "queued"` means *accepted*, not *stored*.
+ *  - `checkStatus(requestId)` GETs `/pins/{requestId}` and returns the real pin state; only
+ *    `pinned` means the second durable copy exists (검증 문제 2).
+ *
+ * Best-effort: `MetadataService` isolates every failure here from the Mint READY gate.
  */
 @Injectable()
 export class FilebasePreservationAdapter implements PreservationPort {
-  private readonly logger = new Logger(FilebasePreservationAdapter.name);
-
   constructor(private readonly appConfig: AppConfigService) {}
 
-  async preserve(request: PreserveRequest): Promise<{ evidenceId: string }> {
+  async preserve(request: PreserveRequest): Promise<{ requestId: string }> {
+    const json = await this.call('POST', '/pins', { cid: request.cid });
+    const requestId = (json as { requestid?: unknown }).requestid;
+    if (typeof requestId !== 'string' || requestId.length === 0) {
+      throw new Error('Filebase POST /pins response did not include a requestid');
+    }
+    return { requestId };
+  }
+
+  async checkStatus(requestId: string): Promise<PreservationPinState> {
+    const json = await this.call('GET', `/pins/${encodeURIComponent(requestId)}`);
+    const status = (json as { status?: unknown }).status;
+    if (typeof status !== 'string' || !PIN_STATES.includes(status as PreservationPinState)) {
+      throw new Error(`Filebase GET /pins/${requestId} returned an unexpected status: ${String(status)}`);
+    }
+    return status as PreservationPinState;
+  }
+
+  private async call(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
     const { filebasePinToken, filebasePinEndpoint, httpTimeoutMs } = this.appConfig.metadata;
     if (!filebasePinToken) {
       throw new FilebaseNotConfiguredError();
@@ -38,25 +64,22 @@ export class FilebasePreservationAdapter implements PreservationPort {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), httpTimeoutMs);
     try {
-      const response = await fetch(`${filebasePinEndpoint.replace(/\/$/, '')}/pins`, {
-        method: 'POST',
+      const response = await fetch(`${filebasePinEndpoint.replace(/\/$/, '')}${path}`, {
+        method,
         headers: {
           Authorization: `Bearer ${filebasePinToken}`,
-          'Content-Type': 'application/json',
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
-        body: JSON.stringify({ cid: request.cid, name: `cube-${request.tokenId}` }),
+        body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal,
       });
       if (!response.ok) {
-        // 409 == this CID is already pinned on this bucket: idempotent success, not a failure.
-        if (response.status === 409) {
-          return { evidenceId: `filebase:${request.cid}` };
-        }
         const bodyText = await response.text().catch(() => '');
-        throw new Error(`Filebase /pins failed: HTTP ${response.status} ${bodyText.slice(0, 200)}`);
+        throw new Error(
+          `Filebase ${method} ${path} failed: HTTP ${response.status} ${bodyText.slice(0, 200)}`,
+        );
       }
-      const json = (await response.json()) as { requestid?: string; pin?: { cid?: string } };
-      return { evidenceId: json.requestid ?? json.pin?.cid ?? `filebase:${request.cid}` };
+      return (await response.json()) as unknown;
     } finally {
       clearTimeout(timeout);
     }

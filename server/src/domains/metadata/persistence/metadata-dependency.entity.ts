@@ -48,6 +48,12 @@ export class MetadataDependency {
   })
   preservationStatus!: MetadataPreservationStatus;
 
+  /** The archival provider's pin-request id (Filebase `requestid`), kept so preservation status can
+   * be reconciled later via `PreservationPort.checkStatus` — `PRESERVED` is only set once that
+   * reports `pinned` (검증 문제 2·3). Null until `preserve()` returns, or when it failed outright. */
+  @Column({ name: 'preservation_request_id', type: 'varchar', length: 255, nullable: true })
+  preservationRequestId!: string | null;
+
   @Column({ type: 'char', length: 64, nullable: true })
   checksum!: string | null;
 
