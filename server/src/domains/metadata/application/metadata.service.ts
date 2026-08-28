@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { DataSource, QueryFailedError } from 'typeorm';
+import { DataSource, IsNull, Not, QueryFailedError } from 'typeorm';
 
 import { AppConfigService } from '../../../shared/config/app-config.service';
 import { canonicalJsonStringify } from '../../../shared/idempotency/valid-command-hash';
@@ -122,10 +122,13 @@ export class MetadataService {
   }
 
   /**
-   * Best-effort refresh of `preservation_status` for every still-`PENDING` dependency of `tokenId`
-   * that has a `preservation_request_id`: asks the provider whether the pin is `pinned`/`failed`
-   * yet, leaving it `PENDING` while it is still `queued`/`pinning` or the provider is unreachable
-   * (검증 문제 2). Called at the end of `prepare()` and on every `GET /internal/v1/metadata/:id`.
+   * Read-only best-effort refresh of `preservation_status` for every still-`PENDING` dependency of
+   * `tokenId` that has a `preservation_request_id`: asks the provider whether the pin is
+   * `pinned`/`failed` yet (a *read* — `checkStatus` — never a new `preserve()` submission),
+   * leaving it `PENDING` while still `queued`/`pinning` or the provider is unreachable (검증 문제 2).
+   * Called at the end of `prepare()` and on `GET /internal/v1/metadata/:id`. Stale `SUBMITTING`
+   * recovery is NOT done here — that is `reconcilePreservationBatch()`'s (the worker's) job so it
+   * does not depend on the Backend calling `prepare()` again (검증 피드백).
    */
   async reconcilePreservation(tokenId: number): Promise<void> {
     const pending = await this.dataSource.getRepository(MetadataDependency).find({
@@ -138,25 +141,68 @@ export class MetadataService {
     );
   }
 
+  /**
+   * The preservation reconciliation worker's pass (검증 피드백):
+   *  1. `PENDING` + request id rows → `checkStatus` → `PRESERVED`/`FAILED` (same as above, but
+   *     across all tokens, batched).
+   *  2. stale `SUBMITTING` rows (submitter presumed crashed) → re-claim with a fresh token and
+   *     resubmit via `ensurePreservation`, so recovery does not need a new `prepare()`.
+   */
+  async reconcilePreservationBatch(): Promise<void> {
+    const repository = this.dataSource.getRepository(MetadataDependency);
+    const limit = this.appConfig.metadata.preservationBatchSize;
+
+    const pending = await repository.find({
+      where: {
+        preservationStatus: MetadataPreservationStatus.PENDING,
+        preservationRequestId: Not(IsNull()),
+      },
+      take: limit,
+    });
+    await Promise.all(pending.map((dep) => this.refreshOnePreservation(dep)));
+
+    const staleMicros = this.appConfig.metadata.preservationStaleClaimMs * 1000;
+    const stale = await repository
+      .createQueryBuilder('dep')
+      .where('dep.preservation_status = :submitting', {
+        submitting: MetadataPreservationStatus.SUBMITTING,
+      })
+      .andWhere(`dep.updated_at < DATE_SUB(NOW(3), INTERVAL ${staleMicros} MICROSECOND)`)
+      .take(limit)
+      .getMany();
+    await Promise.all(stale.map((dep) => this.ensurePreservation(dep.tokenId, dep.cid)));
+  }
+
   private async refreshOnePreservation(dep: MetadataDependency): Promise<void> {
+    const requestId = dep.preservationRequestId;
+    if (requestId === null) {
+      return;
+    }
     let state: PreservationPinState;
     try {
-      state = await this.preservation.checkStatus(dep.preservationRequestId as string);
+      state = await this.preservation.checkStatus(requestId);
     } catch (error) {
       this.logger.warn(
         `Preservation status check failed for tokenId ${dep.tokenId} cid ${dep.cid}: ${(error as Error).message}`,
       );
-      return; // leave PENDING — a later call retries
+      return; // leave PENDING — a later pass retries
     }
     if (state !== 'pinned' && state !== 'failed') {
       return; // queued / pinning — still in progress
     }
-    await this.setPreservation(
-      dep.tokenId,
-      dep.cid,
-      state === 'pinned' ? MetadataPreservationStatus.PRESERVED : MetadataPreservationStatus.FAILED,
-      dep.preservationRequestId,
-    );
+    // Only write the outcome back if this is still the request we just checked — a concurrent
+    // re-claim (new request id) must not be overwritten by a stale reconcile.
+    await this.dataSource
+      .createQueryBuilder()
+      .update(MetadataDependency)
+      .set({
+        preservationStatus:
+          state === 'pinned' ? MetadataPreservationStatus.PRESERVED : MetadataPreservationStatus.FAILED,
+      })
+      .where('token_id = :tokenId', { tokenId: dep.tokenId })
+      .andWhere('cid = :cid', { cid: dep.cid })
+      .andWhere('preservation_request_id = :requestId', { requestId })
+      .execute();
   }
 
   private async recordDependency(
@@ -192,28 +238,33 @@ export class MetadataService {
     }
   }
 
-  /** Time a row may sit `SUBMITTING` before a later `prepare()` assumes the submitter crashed and
-   * re-claims it. Comfortably above `METADATA_HTTP_TIMEOUT_MS` (default 15s). */
-  private static readonly SUBMIT_CLAIM_STALE_SECONDS = 60;
-
   /**
-   * Idempotently makes sure `cid` is submitted for preservation exactly once (검증 피드백 —
-   * preservation 멱등성):
+   * Idempotently makes sure `cid` is submitted for preservation once per generation (검증 피드백 —
+   * preservation 멱등성 & fencing):
    *
    *  - `PRESERVED`                       → nothing to do
-   *  - `PENDING` with a request id       → already submitted, `reconcilePreservation` owns it
-   *  - fresh `SUBMITTING`                → a concurrent `prepare()` is submitting it right now
-   *  - `PENDING` (no request id) / `FAILED` / stale `SUBMITTING` → atomically claim it (→ SUBMITTING)
-   *    and submit. The single conditional `UPDATE` is the concurrency guard: only one caller's
-   *    `affected` is 1, so the same CID is never double-submitted even under a race.
+   *  - `PENDING` with a request id       → already submitted, reconcile owns it
+   *  - fresh `SUBMITTING`                → a concurrent `prepare()`/worker is submitting it right now
+   *  - `PENDING` (no request id) / `FAILED` / stale `SUBMITTING` → atomically claim it (→ SUBMITTING,
+   *    with a **fresh claim token** so the row genuinely changes — a stale re-claim would otherwise
+   *    be a no-op) and submit under that token.
+   *
+   * The conditional `UPDATE` is the concurrency guard (only one caller's `affected` is 1). The
+   * claim token is the *fencing* guard: `preserve()` writes its result back only while the token
+   * still matches, so a submitter returning after its claim was reclaimed cannot clobber the
+   * newer generation. External exactly-once is NOT guaranteed — Filebase may accept a duplicate
+   * pin request for the same CID; the result (that CID is pinned) is what converges.
    */
   private async ensurePreservation(tokenId: number, cid: string): Promise<void> {
+    const claimToken = randomUUID();
+    const staleMicros = this.appConfig.metadata.preservationStaleClaimMs * 1000;
     const claim = await this.dataSource
       .createQueryBuilder()
       .update(MetadataDependency)
       .set({
         preservationStatus: MetadataPreservationStatus.SUBMITTING,
         preservationRequestId: null,
+        preservationClaimToken: claimToken,
       })
       .where('token_id = :tokenId', { tokenId })
       .andWhere('cid = :cid', { cid })
@@ -222,21 +273,22 @@ export class MetadataService {
           (preservation_status = 'PENDING' AND preservation_request_id IS NULL)
           OR preservation_status = 'FAILED'
           OR (preservation_status = 'SUBMITTING'
-              AND updated_at < DATE_SUB(NOW(3), INTERVAL ${MetadataService.SUBMIT_CLAIM_STALE_SECONDS} SECOND))
+              AND updated_at < DATE_SUB(NOW(3), INTERVAL ${staleMicros} MICROSECOND))
         )`,
       )
       .execute();
     if (!claim.affected) {
       return; // PRESERVED, already-submitted PENDING, or a live concurrent submit — leave it be.
     }
-    await this.submitPreservation(tokenId, cid);
+    await this.submitPreservation(tokenId, cid, claimToken);
   }
 
-  /** Runs one `preserve()` for a row this caller has claimed (status `SUBMITTING`). On success the
-   * row goes back to `PENDING` *with* the request id — a `queued` pin is accepted, not stored;
-   * `reconcilePreservation` promotes it to `PRESERVED` once the provider confirms `pinned` (검증
-   * 문제 2·3). A submission error is terminal `FAILED` until the next `prepare()` retries it. */
-  private async submitPreservation(tokenId: number, cid: string): Promise<void> {
+  /** Runs one `preserve()` for a row this caller claimed under `claimToken`. On success the row
+   * goes back to `PENDING` *with* the request id — a `queued` pin is accepted, not stored;
+   * reconcile promotes it to `PRESERVED` once the provider confirms `pinned` (검증 문제 2·3). A
+   * submission error is terminal `FAILED` until re-claimed. Either write only lands while the row
+   * still carries `claimToken` (fencing) — and clears it, since the submission is done. */
+  private async submitPreservation(tokenId: number, cid: string, claimToken: string): Promise<void> {
     try {
       const { requestId } = await this.preservation.preserve({
         cid,
@@ -244,25 +296,31 @@ export class MetadataService {
         contractAddress: this.appConfig.cubeNft.deployment.proxyAddress,
         tokenId,
       });
-      await this.setPreservation(tokenId, cid, MetadataPreservationStatus.PENDING, requestId);
+      await this.completeSubmission(tokenId, cid, claimToken, MetadataPreservationStatus.PENDING, requestId);
     } catch (error) {
       this.logger.warn(`Preservation failed for tokenId ${tokenId} cid ${cid}: ${(error as Error).message}`);
-      await this.setPreservation(tokenId, cid, MetadataPreservationStatus.FAILED, null);
+      await this.completeSubmission(tokenId, cid, claimToken, MetadataPreservationStatus.FAILED, null);
     }
   }
 
-  private async setPreservation(
+  private async completeSubmission(
     tokenId: number,
     cid: string,
+    claimToken: string,
     status: MetadataPreservationStatus,
     requestId: string | null,
   ): Promise<void> {
     await this.dataSource
       .createQueryBuilder()
       .update(MetadataDependency)
-      .set({ preservationStatus: status, preservationRequestId: requestId })
+      .set({
+        preservationStatus: status,
+        preservationRequestId: requestId,
+        preservationClaimToken: null,
+      })
       .where('token_id = :tokenId', { tokenId })
       .andWhere('cid = :cid', { cid })
+      .andWhere('preservation_claim_token = :claimToken', { claimToken })
       .execute();
   }
 }

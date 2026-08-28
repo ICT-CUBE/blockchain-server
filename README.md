@@ -108,8 +108,9 @@ npm run deploy:amoy --workspace=contracts/cube-nft
 - **OpenAPI 계약 테스트 공백** OpenAPI 명세를 저장소 안(`code/openapi.yaml`)으로 옮기고 `openapi-contract.e2e-spec.ts`가 그 파일을 읽도록 수정. 이전에는 비버전관리 `docs/openapi.yaml`을 찾다가 문서 재배치로 파일을 못 찾으면 **8개 테스트가 assertion 없이 통과**(silent skip)하던 상태였음 — 파일 부재 시 이제 suite가 실패한다. 명세는 실제 구현과 대조 검증됨(v1.1.0, 8/8 실질 통과).
 - **민감정보 스캐너 오탐** `scan:sensitive`의 `POSSIBLE_KEY_32B`(0x+64hex)는 keccak256 해시와 형태가 같고 SQL dump는 컬럼 문맥을 잃어 `tx_hash`를 매번 키로 오탐 → advisory로 강등(출력엔 남되 exit code 미반영), `--strict`로 로그 스캔 시 재게이팅. 실제 키 유출은 `--secret-env` 정확 일치로 탐지.
 - **NFT.Storage 폐기 → Filebase** 장기 보존 어댑터를 NFT.Storage(Classic pinning API 2024-06-30 폐기)에서 **Filebase**로 교체. 표준 IPFS Pinning Service API(`POST /pins`, Bearer). `NFT_STORAGE_TOKEN` → `FILEBASE_PIN_TOKEN`(+ `FILEBASE_PIN_ENDPOINT`, 기본 `https://api.filebase.io/v1/ipfs`). 보존은 여전히 best-effort(Mint 비차단).
-  - 비동기 pin: `POST /pins`는 `202 queued`(접수≠저장). `name` 미전송(선택 필드, 재사용 시 409 name conflict). `preservation_status`는 `checkStatus(requestId)`가 `pinned` 확인 후에만 `PRESERVED` — `metadata_dependencies.preservation_request_id` + `reconcilePreservation()`(`prepare()` 말미·`GET /metadata/:id` 시).
-  - 멱등성: 반복·동시 `prepare()`에서 이미 `PRESERVED`거나 제출 중인 CID는 재제출 안 함. `PENDING(id 없음)`/`FAILED`/stale `SUBMITTING`만 원자적 claim(→`SUBMITTING`) 후 1회 제출.
+  - 비동기 pin: `POST /pins`는 `202 queued`(접수≠저장). `name` 미전송(선택 필드, 재사용 시 409 name conflict). `preservation_status`는 `checkStatus(requestId)`가 `pinned` 확인 후에만 `PRESERVED` — `metadata_dependencies.preservation_request_id`.
+  - 상태 갱신: `reconcilePreservation(tokenId)`(read-only, `prepare()` 말미·`GET /metadata/:id`)는 `checkStatus`만. stale 복구·재제출은 **`PreservationReconciliationWorker`**(interval)가 담당 — `prepare()` 재호출에 의존하지 않음.
+  - 멱등성 + fencing: 이미 `PRESERVED`거나 제출 중인 CID는 재제출 안 함. `PENDING(id 없음)`/`FAILED`/stale `SUBMITTING`만 새 `preservation_claim_token`으로 원자적 claim(→`SUBMITTING`) 후 1회 제출. `preserve()` 결과는 claim token이 여전히 일치할 때만 반영 → 재claim된 뒤 늦게 돌아온 이전 submitter가 새 세대를 덮어쓰지 못함. 외부 exactly-once는 미보장(같은 CID pin이라는 멱등적 결과로 수렴).
 
 ## 문서
 

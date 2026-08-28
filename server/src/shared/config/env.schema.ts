@@ -154,6 +154,14 @@ const baseEnvSchema = z.object({
     .int()
     .positive()
     .default(2 * 1024 * 1024),
+  /** How long a preservation dependency may sit `SUBMITTING` before it is assumed the submitter
+   * crashed mid-`preserve()` and the row is re-claimed (검증 피드백). Above METADATA_HTTP_TIMEOUT_MS. */
+  METADATA_PRESERVATION_STALE_CLAIM_MS: z.coerce.number().int().positive().default(60000),
+  /** Poll interval for the preservation reconciliation worker: refreshes `PENDING` pins via
+   * `checkStatus` and re-claims stale `SUBMITTING` rows so recovery does not depend on the Backend
+   * re-calling `prepare()` for that token. */
+  METADATA_PRESERVATION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
+  METADATA_PRESERVATION_BATCH_SIZE: z.coerce.number().int().positive().default(50),
 
   /** TASK-14: structured logging level. */
   LOG_LEVEL: z.enum(['debug', 'log', 'warn', 'error']).default('log'),

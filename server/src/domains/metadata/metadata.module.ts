@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { HmacAuthModule } from '../../shared/auth/hmac/hmac-auth.module';
 import { AppConfigService } from '../../shared/config/app-config.service';
 import { MetadataService } from './application/metadata.service';
+import { PreservationReconciliationWorker } from './application/preservation-reconciliation.worker';
 import { PINNING_PORT } from './application/pinning.port';
 import { PRESERVATION_PORT } from './application/preservation.port';
 import { MetadataController } from './http/metadata.controller';
@@ -23,6 +24,7 @@ import { PinataPinningAdapter } from './providers/pinata-pinning.adapter';
   controllers: [MetadataController],
   providers: [
     MetadataService,
+    PreservationReconciliationWorker,
     FakePinningAdapter,
     PinataPinningAdapter,
     FakePreservationAdapter,

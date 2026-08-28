@@ -60,6 +60,14 @@ export class MetadataDependency {
   @Column({ name: 'preservation_request_id', type: 'varchar', length: 255, nullable: true })
   preservationRequestId!: string | null;
 
+  /** Fencing token for the current `SUBMITTING` claim (검증 피드백). Rewritten on every claim so the
+   * claim `UPDATE` genuinely changes the row (stale re-claim would otherwise be a no-op — MySQL
+   * `affectedRows` counts *changed* rows, and `ON UPDATE` would not refresh `updated_at`). A late
+   * `preserve()` completion only writes its result back when this still matches its own token, so a
+   * submitter that returns after its claim was reclaimed cannot clobber the newer generation. */
+  @Column({ name: 'preservation_claim_token', type: 'char', length: 36, nullable: true })
+  preservationClaimToken!: string | null;
+
   @Column({ type: 'char', length: 64, nullable: true })
   checksum!: string | null;
 

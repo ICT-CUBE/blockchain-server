@@ -91,6 +91,9 @@ export interface MetadataConfig {
   readonly filebasePinEndpoint: string;
   readonly httpTimeoutMs: number;
   readonly imageMaxBytes: number;
+  readonly preservationStaleClaimMs: number;
+  readonly preservationPollIntervalMs: number;
+  readonly preservationBatchSize: number;
 }
 
 export interface LoggingConfig {
@@ -244,6 +247,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       filebasePinEndpoint: parsedEnv.FILEBASE_PIN_ENDPOINT,
       httpTimeoutMs: parsedEnv.METADATA_HTTP_TIMEOUT_MS,
       imageMaxBytes: parsedEnv.METADATA_IMAGE_MAX_BYTES,
+      preservationStaleClaimMs: parsedEnv.METADATA_PRESERVATION_STALE_CLAIM_MS,
+      preservationPollIntervalMs: parsedEnv.METADATA_PRESERVATION_POLL_INTERVAL_MS,
+      preservationBatchSize: parsedEnv.METADATA_PRESERVATION_BATCH_SIZE,
     }),
     logging: Object.freeze({
       level: parsedEnv.LOG_LEVEL,
