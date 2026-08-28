@@ -14,6 +14,12 @@ export enum MetadataPinStatus {
 
 export enum MetadataPreservationStatus {
   PENDING = 'PENDING',
+  /** A `prepare()` call has claimed this row and is mid-`preserve()` — the atomic
+   * `PENDING/FAILED → SUBMITTING` transition is what stops a concurrent or repeated `prepare()`
+   * from double-submitting the same CID (검증 문제 — preservation 멱등성). Transient; resolves to
+   * `PENDING` (with a request id) or `FAILED` within one HTTP call. The status API maps it to
+   * `PENDING`. */
+  SUBMITTING = 'SUBMITTING',
   PRESERVED = 'PRESERVED',
   FAILED = 'FAILED',
 }

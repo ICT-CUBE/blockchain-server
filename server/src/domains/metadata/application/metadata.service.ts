@@ -84,11 +84,11 @@ export class MetadataService {
 
     // Best-effort, isolated from the pin path entirely (TASK-13 §12: the archival provider's SLA is
     // deliberately independent of Pinata's — a preservation failure never blocks READY). Each CID
-    // gets its own pin request (검증 문제 1); the request only reaches PRESERVED once the provider
-    // confirms `pinned`, which `reconcilePreservation` checks (검증 문제 2).
+    // gets its own pin request (검증 문제 1); `ensurePreservation` is idempotent so a repeated or
+    // concurrent prepare() never double-submits an already-PRESERVED or in-flight CID (검증 피드백).
     await Promise.all([
-      this.tryPreserve(input.tokenId, imageCid),
-      this.tryPreserve(input.tokenId, metadataCid),
+      this.ensurePreservation(input.tokenId, imageCid),
+      this.ensurePreservation(input.tokenId, metadataCid),
     ]);
     await this.reconcilePreservation(input.tokenId);
 
@@ -151,10 +151,11 @@ export class MetadataService {
     if (state !== 'pinned' && state !== 'failed') {
       return; // queued / pinning — still in progress
     }
-    await this.setPreservationStatus(
+    await this.setPreservation(
       dep.tokenId,
       dep.cid,
       state === 'pinned' ? MetadataPreservationStatus.PRESERVED : MetadataPreservationStatus.FAILED,
+      dep.preservationRequestId,
     );
   }
 
@@ -191,10 +192,51 @@ export class MetadataService {
     }
   }
 
-  /** Submits one CID for preservation and stores the provider's request id. Status stays `PENDING`
-   * — a `queued` pin is *accepted*, not *stored*; `reconcilePreservation` promotes it to `PRESERVED`
-   * only once the provider confirms `pinned` (검증 문제 2·3). A submission error is terminal `FAILED`. */
-  private async tryPreserve(tokenId: number, cid: string): Promise<void> {
+  /** Time a row may sit `SUBMITTING` before a later `prepare()` assumes the submitter crashed and
+   * re-claims it. Comfortably above `METADATA_HTTP_TIMEOUT_MS` (default 15s). */
+  private static readonly SUBMIT_CLAIM_STALE_SECONDS = 60;
+
+  /**
+   * Idempotently makes sure `cid` is submitted for preservation exactly once (검증 피드백 —
+   * preservation 멱등성):
+   *
+   *  - `PRESERVED`                       → nothing to do
+   *  - `PENDING` with a request id       → already submitted, `reconcilePreservation` owns it
+   *  - fresh `SUBMITTING`                → a concurrent `prepare()` is submitting it right now
+   *  - `PENDING` (no request id) / `FAILED` / stale `SUBMITTING` → atomically claim it (→ SUBMITTING)
+   *    and submit. The single conditional `UPDATE` is the concurrency guard: only one caller's
+   *    `affected` is 1, so the same CID is never double-submitted even under a race.
+   */
+  private async ensurePreservation(tokenId: number, cid: string): Promise<void> {
+    const claim = await this.dataSource
+      .createQueryBuilder()
+      .update(MetadataDependency)
+      .set({
+        preservationStatus: MetadataPreservationStatus.SUBMITTING,
+        preservationRequestId: null,
+      })
+      .where('token_id = :tokenId', { tokenId })
+      .andWhere('cid = :cid', { cid })
+      .andWhere(
+        `(
+          (preservation_status = 'PENDING' AND preservation_request_id IS NULL)
+          OR preservation_status = 'FAILED'
+          OR (preservation_status = 'SUBMITTING'
+              AND updated_at < DATE_SUB(NOW(3), INTERVAL ${MetadataService.SUBMIT_CLAIM_STALE_SECONDS} SECOND))
+        )`,
+      )
+      .execute();
+    if (!claim.affected) {
+      return; // PRESERVED, already-submitted PENDING, or a live concurrent submit — leave it be.
+    }
+    await this.submitPreservation(tokenId, cid);
+  }
+
+  /** Runs one `preserve()` for a row this caller has claimed (status `SUBMITTING`). On success the
+   * row goes back to `PENDING` *with* the request id — a `queued` pin is accepted, not stored;
+   * `reconcilePreservation` promotes it to `PRESERVED` once the provider confirms `pinned` (검증
+   * 문제 2·3). A submission error is terminal `FAILED` until the next `prepare()` retries it. */
+  private async submitPreservation(tokenId: number, cid: string): Promise<void> {
     try {
       const { requestId } = await this.preservation.preserve({
         cid,
@@ -202,28 +244,23 @@ export class MetadataService {
         contractAddress: this.appConfig.cubeNft.deployment.proxyAddress,
         tokenId,
       });
-      await this.dataSource
-        .createQueryBuilder()
-        .update(MetadataDependency)
-        .set({ preservationRequestId: requestId })
-        .where('token_id = :tokenId', { tokenId })
-        .andWhere('cid = :cid', { cid })
-        .execute();
+      await this.setPreservation(tokenId, cid, MetadataPreservationStatus.PENDING, requestId);
     } catch (error) {
       this.logger.warn(`Preservation failed for tokenId ${tokenId} cid ${cid}: ${(error as Error).message}`);
-      await this.setPreservationStatus(tokenId, cid, MetadataPreservationStatus.FAILED);
+      await this.setPreservation(tokenId, cid, MetadataPreservationStatus.FAILED, null);
     }
   }
 
-  private async setPreservationStatus(
+  private async setPreservation(
     tokenId: number,
     cid: string,
     status: MetadataPreservationStatus,
+    requestId: string | null,
   ): Promise<void> {
     await this.dataSource
       .createQueryBuilder()
       .update(MetadataDependency)
-      .set({ preservationStatus: status })
+      .set({ preservationStatus: status, preservationRequestId: requestId })
       .where('token_id = :tokenId', { tokenId })
       .andWhere('cid = :cid', { cid })
       .execute();

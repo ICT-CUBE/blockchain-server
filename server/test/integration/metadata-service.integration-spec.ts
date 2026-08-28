@@ -60,13 +60,19 @@ class FailingPreservationAdapter implements PreservationPort {
  * async lifecycle (queued → pinned/failed) can be asserted deterministically (검증 문제 1·2). */
 class RecordingPreservationAdapter implements PreservationPort {
   readonly preserved: PreserveRequest[] = [];
+  failNextPreserve = false;
+  private seq = 0;
   private readonly states = new Map<string, PreservationPinState>();
 
   constructor(private readonly initialState: PreservationPinState = 'queued') {}
 
   preserve(request: PreserveRequest): Promise<{ requestId: string }> {
     this.preserved.push(request);
-    const requestId = `req-${request.cid}`;
+    if (this.failNextPreserve) {
+      this.failNextPreserve = false;
+      return Promise.reject(new Error('simulated Filebase submit failure'));
+    }
+    const requestId = `req-${request.cid}-${++this.seq}`;
     this.states.set(requestId, this.initialState);
     return Promise.resolve({ requestId });
   }
@@ -75,8 +81,17 @@ class RecordingPreservationAdapter implements PreservationPort {
     return Promise.resolve(this.states.get(requestId) ?? 'failed');
   }
 
-  setState(cid: string, state: PreservationPinState): void {
-    this.states.set(`req-${cid}`, state);
+  countFor(cid: string): number {
+    return this.preserved.filter((r) => r.cid === cid).length;
+  }
+
+  /** Drive the outcome for every request id issued for `cid` so far. */
+  setStateForCid(cid: string, state: PreservationPinState): void {
+    for (const key of this.states.keys()) {
+      if (key.startsWith(`req-${cid}-`)) {
+        this.states.set(key, state);
+      }
+    }
   }
 }
 
@@ -229,8 +244,8 @@ describe('MetadataService (integration, real DB)', () => {
     ).toBe(true);
 
     // Provider finishes: image pinned, metadata JSON failed.
-    recording.setState(imageCid, 'pinned');
-    recording.setState(result.metadataCid, 'failed');
+    recording.setStateForCid(imageCid, 'pinned');
+    recording.setStateForCid(result.metadataCid, 'failed');
     await service.reconcilePreservation(tokenId);
 
     const byKind = new Map(
@@ -238,6 +253,91 @@ describe('MetadataService (integration, real DB)', () => {
     );
     expect(byKind.get(MetadataDependencyKind.IMAGE)).toBe(MetadataPreservationStatus.PRESERVED);
     expect(byKind.get(MetadataDependencyKind.METADATA_JSON)).toBe(MetadataPreservationStatus.FAILED);
+  });
+
+  it('a repeated prepare() does not re-submit an already-PRESERVED or in-flight CID (검증 피드백 — 멱등성)', async () => {
+    const recording = new RecordingPreservationAdapter('pinned'); // reconcile promotes to PRESERVED
+    const service = makeService(new FakePinningAdapter(), recording);
+    const tokenId = randomTokenId();
+    const input = {
+      tokenId,
+      cubeNumber: `CUBE-${tokenId}`,
+      publicGrade: 'A',
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`image-${tokenId}`)]).toString('base64'),
+      benefitReferenceId: `benefit-${tokenId}`,
+    };
+
+    const result = await service.prepare(input);
+    const repo = dataSource.getRepository(MetadataDependency);
+    const afterFirst = await repo.find({ where: { tokenId } });
+    expect(afterFirst.every((d) => d.preservationStatus === MetadataPreservationStatus.PRESERVED)).toBe(true);
+    const requestIds = new Map(afterFirst.map((d) => [d.cid, d.preservationRequestId]));
+
+    // Re-prepare the exact same content twice more.
+    await service.prepare(input);
+    await service.prepare(input);
+
+    expect(recording.countFor(result.metadataCid)).toBe(1); // submitted once, ever
+    expect(recording.preserved).toHaveLength(2); // image + metadata, not 6
+    const afterRepeats = await repo.find({ where: { tokenId } });
+    for (const dep of afterRepeats) {
+      expect(dep.preservationStatus).toBe(MetadataPreservationStatus.PRESERVED);
+      expect(dep.preservationRequestId).toBe(requestIds.get(dep.cid)); // request id is immutable
+    }
+  });
+
+  it('a repeated prepare() DOES retry a CID whose previous preservation submission FAILED', async () => {
+    const recording = new RecordingPreservationAdapter('queued');
+    const service = makeService(new FakePinningAdapter(), recording);
+    const tokenId = randomTokenId();
+    const input = {
+      tokenId,
+      cubeNumber: `CUBE-${tokenId}`,
+      publicGrade: 'A',
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`image-${tokenId}`)]).toString('base64'),
+      benefitReferenceId: `benefit-${tokenId}`,
+    };
+
+    recording.failNextPreserve = true; // the image submission (first call) fails
+    const result = await service.prepare(input);
+    const repo = dataSource.getRepository(MetadataDependency);
+    const image = await repo.findOneOrFail({ where: { tokenId, kind: MetadataDependencyKind.IMAGE } });
+    expect(image.preservationStatus).toBe(MetadataPreservationStatus.FAILED);
+    expect(image.preservationRequestId).toBeNull();
+
+    // Re-prepare: the FAILED image row is atomically reclaimed and resubmitted; the already-PENDING
+    // metadata JSON row is not.
+    await service.prepare(input);
+
+    expect(recording.countFor(image.cid)).toBe(2); // failed once, retried once
+    expect(recording.countFor(result.metadataCid)).toBe(1);
+    const retried = await repo.findOneOrFail({ where: { tokenId, kind: MetadataDependencyKind.IMAGE } });
+    expect(retried.preservationStatus).toBe(MetadataPreservationStatus.PENDING);
+    expect(retried.preservationRequestId).not.toBeNull();
+  });
+
+  it('two concurrent prepare() calls submit each CID exactly once', async () => {
+    const recording = new RecordingPreservationAdapter('queued');
+    const service = makeService(new FakePinningAdapter(), recording);
+    const tokenId = randomTokenId();
+    const input = {
+      tokenId,
+      cubeNumber: `CUBE-${tokenId}`,
+      publicGrade: 'A',
+      imageBase64: Buffer.concat([PNG_MAGIC, Buffer.from(`image-${tokenId}`)]).toString('base64'),
+      benefitReferenceId: `benefit-${tokenId}`,
+    };
+
+    const [a] = await Promise.all([service.prepare(input), service.prepare(input)]);
+
+    expect(recording.countFor(a.metadataCid)).toBe(1);
+    const image = (
+      await dataSource
+        .getRepository(MetadataDependency)
+        .find({ where: { tokenId, kind: MetadataDependencyKind.IMAGE } })
+    )[0];
+    expect(recording.countFor(image!.cid)).toBe(1);
+    expect(recording.preserved).toHaveLength(2);
   });
 
   it('does not reach READY if the image dependency fails to pin, even though the metadata JSON step never runs', async () => {

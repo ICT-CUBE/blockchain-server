@@ -4,6 +4,7 @@ import { HmacGuard } from '../../../shared/auth/hmac/hmac.guard';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
 import { MetadataService } from '../application/metadata.service';
 import { prepareMetadataRequestSchema, type PrepareMetadataRequest } from '../metadata-request.schema';
+import { MetadataPreservationStatus } from '../persistence/metadata-dependency.entity';
 import type { MetadataStatusResponse, PrepareMetadataResponse } from './metadata.response';
 
 /** `POST /internal/v1/metadata` (prepare) and `GET /internal/v1/metadata/:tokenId` (status) —
@@ -40,7 +41,12 @@ export class MetadataController {
         cid: dep.cid,
         kind: dep.kind,
         pinStatus: dep.pinStatus,
-        preservationStatus: dep.preservationStatus,
+        // SUBMITTING is a transient internal claim marker — the API only exposes the three
+        // observable states (검증 피드백).
+        preservationStatus:
+          dep.preservationStatus === MetadataPreservationStatus.SUBMITTING
+            ? MetadataPreservationStatus.PENDING
+            : dep.preservationStatus,
         preservationRequestId: dep.preservationRequestId,
       })),
     };
