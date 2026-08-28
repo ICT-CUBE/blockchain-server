@@ -3,6 +3,7 @@ import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 
 import { ALL_ENTITIES } from '../../src/shared/database/entities';
+import { enforceUtcSessionTimezone } from '../../src/shared/database/enforce-utc-session-timezone';
 
 /**
  * Connects to a real MySQL for the integration suite. Requires `DATABASE_URL` in the environment
@@ -20,7 +21,7 @@ export function createTestDataSource(): DataSource {
     );
   }
 
-  return new DataSource({
+  const dataSource = new DataSource({
     type: 'mysql',
     url: databaseUrl,
     // Same UTC contract as the runtime `DatabaseModule` (검증 D4) — without it this test DataSource
@@ -29,4 +30,16 @@ export function createTestDataSource(): DataSource {
     entities: ALL_ENTITIES,
     synchronize: false,
   });
+
+  // Pin the MySQL session to UTC the moment the suite connects, exactly as the runtime
+  // `DatabaseTimezoneEnforcer` does — so `npm run test:integration` passes identically on a
+  // UTC-hosted and an `Asia/Seoul`-hosted MySQL (검증 문제 1 / 문제 4).
+  const initialize = dataSource.initialize.bind(dataSource);
+  dataSource.initialize = async () => {
+    const result = await initialize();
+    await enforceUtcSessionTimezone(dataSource);
+    return result;
+  };
+
+  return dataSource;
 }

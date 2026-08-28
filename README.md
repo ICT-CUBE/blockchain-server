@@ -29,6 +29,10 @@ npm workspaces 기반 모노레포:
 - MySQL 8 (`docker-compose.yml`이 로컬용 인스턴스를 제공)
 - Amoy/Mainnet 배포 시: Infura 등 RPC 엔드포인트, 자금이 있는 배포자 지갑
 
+> **MySQL 시간대**: 서버는 연결 시마다 세션을 `time_zone = '+00:00'`로 고정하므로(`enforce-utc-session-timezone.ts`),
+> 호스트 MySQL이 `Asia/Seoul` 등 비-UTC로 돌아가도 타임스탬프·`LONG_PENDING`·signed-tx 복구가 UTC 환경과
+> 동일하게 동작한다. 통합 테스트도 마찬가지다(`test:integration`은 UTC·KST MySQL에서 모두 63/63).
+
 ## 시작하기
 
 ```bash
@@ -44,10 +48,14 @@ npm run test                      # contracts + server 유닛 테스트
 ### 로컬 체인에서 전체 흐름 실행
 
 ```bash
-npm run node --workspace=contracts/cube-nft                                  # 별도 터미널: Hardhat 노드
-npm run deploy:local --workspace=contracts/cube-nft -- --network localhost   # 배포
-npm run start:dev --workspace=server                                         # 서버 기동
+npm run node --workspace=contracts/cube-nft            # 별도 터미널: Hardhat 노드 (127.0.0.1:8545)
+npm run deploy:localhost --workspace=contracts/cube-nft # 그 노드에 배포 → contracts/deployments/localhost.json
+npm run start:dev --workspace=server                    # 서버 기동
 ```
+
+> `deploy:local`(= `--network hardhatMainnet`, 인프로세스 시뮬레이션)과 `deploy:localhost`(= `--network localhost`,
+> 위에서 띄운 `npm run node`에 접속)는 서로 다른 네트워크다. `--network`를 뒤에 또 붙이지 말 것 —
+> 스크립트에 이미 포함돼 있어 `HHE510: Options of type "STRING_WITHOUT_DEFAULT" cannot be repeated` 오류가 난다.
 
 ### 서버 테스트 (실제 로컬 체인 + 실제 MySQL 필요)
 
@@ -91,6 +99,12 @@ npm run deploy:amoy --workspace=contracts/cube-nft
 - **D3** Reentry/External-Resale 접수 전에 relayer 시점 `eth_call` dry-run으로 서명·nonce·deadline·owner·pause를 검증(403/409, RPC 장애는 503); `transition()`이 `reviewReason/failureCode`를 기록; 운영자 복구 `POST /internal/v1/audit/operations/{id}/resolve-review`.
 - **D4/D5** DataSource `timezone: 'Z'`. **D6** 최종 확정/실패 시 raw tx ciphertext 폐기. **D7** receipt block/hash/status·confirmedAt 저장, blockHash 재조회 검증, `GET /operations/{id}`에 `txAttempts`·증거·알림 상태 노출. **D8** 외부 서명은 암호화 저장·해시 기록·제출 후 폐기. **D9** `tsconfig.build.json rootDir=src` → `dist/main.js`. **D10** 잘못된 key scope는 403 `HMAC_SCOPE_FORBIDDEN`. **D11** RPC 오류 로그는 `class/code: reason`만 기록(raw tx·payload redaction).
 - `GET /internal/v1/nfts/{tokenId}`, Metadata 이미지 제한(strict base64·크기·magic byte), Wallet 응답(`provider=WEB3AUTH`, `providerAdapter`, `integrationReady`, `createdAt`), webhook payload를 `docs/openapi.yaml#BlockchainEvent`와 일치.
+
+### 2차 remediation (docs/verification/문제-정의-원인-분석-개선안.md)
+
+- **문제 1** 모든 MySQL 연결을 세션 `time_zone = '+00:00'`로 고정(`DatabaseTimezoneEnforcer` + `enforce-utc-session-timezone.ts`) — `timezone: 'Z'`는 드라이버 파싱만 UTC로 바꿀 뿐 세션은 서버 기본값을 따르므로, KST 호스트에서 타임스탬프가 9시간 어긋나고 `LONG_PENDING` 오탐이 나던 문제 제거. `SignedAttemptRecoveryWorker`의 재시도 due 판정도 앱 `Date` 대신 `NOW(3)`로 통일(`nextBroadcastAt`는 `DATE_ADD(NOW(3), …)`로 기록) → nonce gap 후 signer 영구 halt 재발 방지.
+- **문제 2** 통합 스펙마다 공유 자원(고정 Hardhat signer·MySQL)의 휘발성 테이블을 파일 실행 전 초기화(`test/integration/reset-db-between-files.ts`, `setupFilesAfterEnv`) → 한 스펙의 실패가 뒤 스펙을 signer halt로 연쇄 실패시키지 않음. `test:integration`은 UTC·KST MySQL에서 반복 실행해도 63/63.
+- **문제 3** `deploy:localhost`(= `--network localhost`) 스크립트 추가 — README가 `deploy:local`에 `--network`를 중복 전달해 `HHE510`으로 실패하던 문제 수정.
 
 ## 문서
 

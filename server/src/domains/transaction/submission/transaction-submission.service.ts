@@ -347,11 +347,22 @@ export class TransactionSubmissionService implements TransactionSubmissionPort {
       return { status: 'ESCALATED', error: summary };
     }
 
-    const nextBroadcastAt = new Date(Date.now() + this.computeBroadcastBackoffMs(attemptCount));
+    // 검증 문제 1: schedule the retry against the DB clock (`DATE_ADD(NOW(3), …)`), not the app's
+    // `new Date()`, so `SignedAttemptRecoveryWorker` — which now compares with `NOW(3)` — always
+    // agrees on whether the backoff has elapsed, even on a non-UTC-hosted or multi-process
+    // deployment. The `Date` below is only an approximation used for the log line and the return
+    // value's type contract; nothing keys off its exact value.
+    const backoffMs = this.computeBroadcastBackoffMs(attemptCount);
+    const backoffMicros = Math.round(backoffMs * 1000);
+    const nextBroadcastAt = new Date(Date.now() + backoffMs);
     await this.dataSource
       .createQueryBuilder()
       .update(TransactionAttempt)
-      .set({ broadcastAttemptCount: attemptCount, nextBroadcastAt, lastBroadcastError: described })
+      .set({
+        broadcastAttemptCount: attemptCount,
+        nextBroadcastAt: () => `DATE_ADD(NOW(3), INTERVAL ${backoffMicros} MICROSECOND)`,
+        lastBroadcastError: described,
+      })
       .where('id = :attemptId', { attemptId })
       .andWhere('status = :signed', { signed: TransactionAttemptStatus.SIGNED })
       .execute();

@@ -5,6 +5,7 @@ import { config as loadDotenv } from 'dotenv';
 import { DataSource } from 'typeorm';
 
 import { ALL_ENTITIES } from './entities';
+import { enforceUtcSessionTimezone } from './enforce-utc-session-timezone';
 
 // Standalone entry point for the TypeORM CLI (`npm run migration:generate|run|revert`), which runs
 // outside Nest's DI and so cannot go through AppConfigService. Loads `<blockchain-root>/.env`
@@ -19,7 +20,7 @@ if (!databaseUrl) {
 
 // A single default export only — the TypeORM CLI's `loadDataSource` rejects a file with more than
 // one exported DataSource-typed binding.
-export default new DataSource({
+const dataSource = new DataSource({
   type: 'mysql',
   url: databaseUrl,
   // Same UTC contract as the runtime `DatabaseModule` — see the note there (검증 D4/D5).
@@ -28,3 +29,14 @@ export default new DataSource({
   migrations: [path.join(__dirname, 'migrations', '*.{js,ts}')],
   synchronize: false,
 });
+
+// The CLI calls `.initialize()` itself; pin the session to UTC right after so migrations that read
+// or compare timestamps behave the same on a non-UTC-hosted MySQL (검증 문제 1 / 문제 4).
+const initialize = dataSource.initialize.bind(dataSource);
+dataSource.initialize = async () => {
+  const result = await initialize();
+  await enforceUtcSessionTimezone(dataSource);
+  return result;
+};
+
+export default dataSource;
