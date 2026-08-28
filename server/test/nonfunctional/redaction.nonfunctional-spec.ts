@@ -1,6 +1,6 @@
 import { Wallet } from 'ethers';
 
-import { scanText } from '../../scripts/scan-sensitive';
+import { isGating, scanText } from '../../scripts/scan-sensitive';
 import { describeRpcError, redactHexBlobs } from '../../src/domains/transaction/rpc/rpc-error';
 import { redactSensitiveKeys } from '../../src/shared/logging/sensitive-key-redactor';
 import { StructuredLogger } from '../../src/shared/logging/structured-logger';
@@ -54,6 +54,26 @@ describe('nonfunctional: sensitive-material redaction and scanner', () => {
   it('the scanner does not flag ordinary hashes and addresses (negative control)', () => {
     const benign = `txHash=0x${'ab'.repeat(32)} blockHash: 0x${'cd'.repeat(32)} owner 0x${'12'.repeat(20)} nonce 25`;
     expect(scanText('benign', benign, [])).toEqual([]);
+  });
+
+  it('POSSIBLE_KEY_32B is advisory (does not gate CI); raw tx / signature / JWT / SECRET_LITERAL gate (검증 피드백)', () => {
+    // A mysqldump row: the tx_hash has no adjacent column name, so the context filter cannot
+    // recognise it — it is still *found*, but must not drive the exit code.
+    const dumpRow = `INSERT INTO transaction_attempts VALUES (1,'op',0,31337,'0x70997970c51812dc3a010c7d01b50e0d17dc79c8',5,'0x${'9f'.repeat(32)}','SIGNED');`;
+    const dumpFindings = scanText('dump.sql', dumpRow, []);
+    expect(dumpFindings.some((f) => f.rule === 'POSSIBLE_KEY_32B')).toBe(true);
+    expect(dumpFindings.every((f) => !isGating(f.rule))).toBe(true);
+
+    expect(isGating('POSSIBLE_KEY_32B')).toBe(false);
+    expect(isGating('RAW_TX_TYPED')).toBe(true);
+    expect(isGating('SIGNATURE_65B')).toBe(true);
+    expect(isGating('JWT')).toBe(true);
+    expect(isGating('RPC_PAYLOAD_ECHO')).toBe(true);
+    expect(isGating('SECRET_LITERAL')).toBe(true);
+
+    // A real leaked key is caught reliably only via --secret-env (SECRET_LITERAL), which gates.
+    const withSecret = scanText('leak.log', `key=${wallet.privateKey}`, [wallet.privateKey]);
+    expect(withSecret.some((f) => f.rule === 'SECRET_LITERAL' && isGating(f.rule))).toBe(true);
   });
 
   it('describeRpcError strips a signed raw transaction embedded in an ethers broadcast error', () => {

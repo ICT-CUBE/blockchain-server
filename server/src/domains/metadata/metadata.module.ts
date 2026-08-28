@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 
 import { HmacAuthModule } from '../../shared/auth/hmac/hmac-auth.module';
 import { AppConfigService } from '../../shared/config/app-config.service';
@@ -37,7 +37,20 @@ import { PinataPinningAdapter } from './providers/pinata-pinning.adapter';
         config: AppConfigService,
         fake: FakePreservationAdapter,
         real: NftStoragePreservationAdapter,
-      ) => (config.metadata.provider === 'real' ? real : fake),
+      ) => {
+        if (config.metadata.provider === 'real') {
+          // NFT.Storage Classic is decommissioned. Preservation is best-effort so
+          // Mint still works on Pinata's hot pin alone, but NFR-011's dual preservation is not met
+          // until PreservationPort is rebound to a live provider.
+          new Logger('MetadataModule').warn(
+            'METADATA_PROVIDER=real: long-term preservation is UNAVAILABLE — the NFT.Storage ' +
+              'Classic API was decommissioned 2024-06-30. Metadata has a single copy (Pinata) ' +
+              'only. Rebind PreservationPort to Lighthouse/Storacha/Filebase to restore NFR-011.',
+          );
+          return real;
+        }
+        return fake;
+      },
     },
   ],
   exports: [MetadataService],

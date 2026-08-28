@@ -87,7 +87,7 @@ npm run deploy:amoy --workspace=contracts/cube-nft
 | `npm run test:nonfunctional` | 민감정보 redaction corpus + 다중 규칙 scanner 검증 |
 | `npm run test:amoy` | Amoy 인수(`server/scripts/amoy-acceptance.ts`) — `AMOY_RPC_URL_PRIMARY`, 자금 있는 `MINT/RELAYER_SIGNER_PRIVATE_KEY`, `contracts/deployments/amoy.json` 필요. 없으면 **실패**(skip 아님). JSON 리포트는 `reports/` |
 | `npm run auth:headers -- --method POST --path /internal/v1/wallets --body '{"userId":"u1"}' [--scope operator] [--jwt '{...}'] [--out file]` | curl `-H @file`용 HMAC(+승인 JWT) 헤더 생성. secret은 출력하지 않음 |
-| `npm run scan:sensitive -- <file|dir>... [--secret-env HMAC_INBOUND_KEY_SECRET,...]` | 로그·DB dump에서 signed raw tx(typed/legacy)·65B 서명·키 형태·RPC payload echo·JWT·secret 리터럴 검사, 발견 시 exit 1 |
+| `npm run scan:sensitive -- <file\|dir>... [--secret-env NAME,...] [--strict]` | 로그·DB dump에서 signed raw tx(typed/legacy)·65B 서명·RPC payload echo·JWT·`--secret-env` 리터럴을 검사(**gating**, 발견 시 exit 1). 32바이트 hex(`POSSIBLE_KEY_32B`)는 keccak 해시와 형태가 같아 **advisory**로만 출력 — 실제 키 유출 탐지는 `--secret-env`에 `MINT_SIGNER_PRIVATE_KEY,RELAYER_SIGNER_PRIVATE_KEY,AMOY_DEPLOYER_PRIVATE_KEY,RAW_TX_ENCRYPTION_KEY,APPROVAL_JWT_SECRET,HMAC_*_KEY_SECRET`를 넘겨 정확 일치로. 로그(dump 아님) 스캔 시 `--strict`로 advisory도 gating |
 | `npm run smoke:build` | `server/dist/main.js` 산출 확인 (D9) |
 | `npm run smoke:docker` | `server/Dockerfile` 빌드 → 컨테이너 기동 → `/health`·`/ready` 확인. `.env`와 `SMOKE_DATABASE_URL`/`SMOKE_RPC_URL`/`SMOKE_NETWORK`(기본 host.docker.internal의 MySQL·Hardhat, `localhost` 네트워크) 사용 |
 | `npm run fill-nonce-gap --workspace=server -- --signer relayer [--dry-run]` | 운영자 승인 절차: signer nonce gap을 0-value self tx로 메우고 halt 해제 (D1 §10) |

@@ -1,55 +1,34 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
-import { AppConfigService } from '../../../shared/config/app-config.service';
 import type { PreservationPort, PreserveRequest } from '../application/preservation.port';
 
-const NFT_STORAGE_PINS_URL = 'https://api.nft.storage/pins';
-
-/** Thrown when `NFT_STORAGE_TOKEN` is missing — see `PinataNotConfiguredError`'s identical
- * reasoning. */
-export class NftStorageNotConfiguredError extends Error {
-  constructor() {
-    super('NFT.Storage adapter is selected but NFT_STORAGE_TOKEN is not set — see .env.example.');
-    this.name = 'NftStorageNotConfiguredError';
+/**
+ * NFT.Storage **Classic** (NFTUp, the Classic web app, Classic SDK, and the Pinning Service API at
+ * `api.nft.storage/pins`) was **decommissioned on 2024-06-30** — it no longer accepts new
+ * uploads/pins. This adapter therefore cannot preserve anything; it fails fast with an actionable
+ * message rather than timing out against a dead endpoint (검증 피드백 2026-08-28).
+ *
+ * Preservation is *best-effort* (`MetadataService.tryPreserve` swallows the error and Mint READY
+ * never depends on it), so a real deployment still functions — but NFR-011's "이중 보존" is reduced
+ * to Pinata-only until `PreservationPort` is rebound to a live provider (Lighthouse / Storacha /
+ * Filebase / a second Pinata account). The port interface is unchanged; only this class needs
+ * replacing. `MetadataModule` logs a startup warning whenever `METADATA_PROVIDER=real` selects this.
+ */
+export class NftStorageDecommissionedError extends Error {
+  constructor(tokenId: number) {
+    super(
+      `Cannot preserve tokenId ${tokenId}: NFT.Storage Classic (api.nft.storage/pins) was ` +
+        'decommissioned 2024-06-30 and accepts no new pins. Long-term preservation is currently ' +
+        'unavailable — rebind PreservationPort to a live provider (Lighthouse / Storacha / ' +
+        'Filebase).',
+    );
+    this.name = 'NftStorageDecommissionedError';
   }
 }
 
-/**
- * Real adapter over NFT.Storage's `POST /pins` — the standard IPFS "Pinning Service API" shape
- * (`{cid, name}`, no raw bytes: the service fetches by CID from the wider IPFS network, which
- * Pinata's hot pin already makes reachable). Implemented per that published API contract but
- * **not** live-verified end-to-end — no `NFT_STORAGE_TOKEN` was available to this codebase at
- * implementation time (TASK-13 §14).
- */
 @Injectable()
 export class NftStoragePreservationAdapter implements PreservationPort {
-  private readonly logger = new Logger(NftStoragePreservationAdapter.name);
-
-  constructor(private readonly appConfig: AppConfigService) {}
-
-  async preserve(request: PreserveRequest): Promise<{ evidenceId: string }> {
-    const { nftStorageToken, httpTimeoutMs } = this.appConfig.metadata;
-    if (!nftStorageToken) {
-      throw new NftStorageNotConfiguredError();
-    }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), httpTimeoutMs);
-    try {
-      const response = await fetch(NFT_STORAGE_PINS_URL, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${nftStorageToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cid: request.cid, name: `cube-${request.tokenId}` }),
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const bodyText = await response.text().catch(() => '');
-        throw new Error(`NFT.Storage /pins failed: HTTP ${response.status} ${bodyText.slice(0, 200)}`);
-      }
-      const json = (await response.json()) as { requestid?: string; pin?: { cid?: string } };
-      return { evidenceId: json.requestid ?? json.pin?.cid ?? request.cid };
-    } finally {
-      clearTimeout(timeout);
-    }
+  preserve(request: PreserveRequest): Promise<{ evidenceId: string }> {
+    return Promise.reject(new NftStorageDecommissionedError(request.tokenId));
   }
 }
