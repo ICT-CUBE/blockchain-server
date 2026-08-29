@@ -40,6 +40,9 @@ export class SignedAttemptRecoveryWorker extends IntervalWorker {
   }
 
   protected async runOnce(): Promise<void> {
+    if (this.appConfig.submission.pauseBeforeBroadcast) {
+      return; // T10 process-kill spec: nothing broadcasts while paused (see env.schema).
+    }
     const due = await this.dataSource
       .getRepository(TransactionAttempt)
       .createQueryBuilder('attempt')

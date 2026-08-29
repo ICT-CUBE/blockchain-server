@@ -94,6 +94,14 @@ const baseEnvSchema = z.object({
       message: 'must be a base64-encoded 32-byte AES-256-GCM key',
     }),
   SUBMISSION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+  /** TEST ONLY (T10 process-kill 검증): when `1`/`true` **and** `NODE_ENV=test`, `submit()` commits
+   * the SIGNED attempt but does not broadcast, and `SignedAttemptRecoveryWorker` stays idle — so a
+   * test can `SIGKILL` the process with a durable SIGNED attempt and prove a fresh process recovers
+   * it. `loadConfig` drops it unless `NODE_ENV==='test'`, so it can never take effect in prod. */
+  SUBMISSION_PAUSE_BEFORE_BROADCAST: z
+    .string()
+    .optional()
+    .transform((v) => v === '1' || v === 'true'),
   /** 검증 D1: a SIGNED attempt whose broadcast keeps failing transiently is retried with
    * exponential backoff (base = SUBMISSION_POLL_INTERVAL_MS, capped at BROADCAST_MAX_BACKOFF_MS)
    * at most BROADCAST_MAX_RETRIES times before the Operation goes to REVIEW_REQUIRED. */

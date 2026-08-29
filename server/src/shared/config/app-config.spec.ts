@@ -60,6 +60,21 @@ describe('loadConfig', () => {
     expect(config.audit.longPendingThresholdMs).toBe(30 * 60 * 1000);
     expect(config.hmacOperator.current.keyId).toBe('operator-v1');
     expect(config.hmacOperator.previous).toBeNull();
+    expect(config.submission.pauseBeforeBroadcast).toBe(false);
+  });
+
+  it('SUBMISSION_PAUSE_BEFORE_BROADCAST is honoured only under NODE_ENV=test (never in production)', () => {
+    expect(
+      loadConfig(baseEnv({ SUBMISSION_PAUSE_BEFORE_BROADCAST: '1' })).submission.pauseBeforeBroadcast,
+    ).toBe(true);
+    expect(
+      loadConfig(baseEnv({ NODE_ENV: 'production', SUBMISSION_PAUSE_BEFORE_BROADCAST: '1' })).submission
+        .pauseBeforeBroadcast,
+    ).toBe(false);
+    expect(
+      loadConfig(baseEnv({ NODE_ENV: 'development', SUBMISSION_PAUSE_BEFORE_BROADCAST: 'true' })).submission
+        .pauseBeforeBroadcast,
+    ).toBe(false);
   });
 
   it('falls back to well-known Hardhat dev signers/RPC on a local network (localhost included, mirroring deploy.ts)', () => {

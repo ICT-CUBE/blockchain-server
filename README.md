@@ -68,6 +68,15 @@ DATABASE_URL=... npm run test:e2e --workspace=server   # 전체 HTTP 스택
 
 integration/e2e는 **fresh Hardhat 노드 + 재배포 + 깨끗한 테스트 DB**를 전제로 한다 — 절차는 `docs/verification/개발-로그.md`(상위, 비버전관리) 5절 참고.
 
+```bash
+DATABASE_URL=... npm run test:integration:process   # T10 실제 process-kill 복구 (opt-in, 기본 회귀 제외)
+```
+
+`test:integration:process`는 `nest build` 후 `node dist/main.js`를 자식 프로세스로 기동하고, 서명·raw tx
+commit 직후 `SIGKILL`한 뒤, 플래그 없는 새 프로세스가 저장된 raw tx로 동일 txHash를 재전송해 복구하는지
+검증한다. 정지 훅 `SUBMISSION_PAUSE_BEFORE_BROADCAST`는 **`NODE_ENV=test` + 플래그가 모두 참일 때만**
+활성화된다(운영에서는 `loadConfig`가 무시). 자식 프로세스 기동·`SIGKILL`로 느려 기본 회귀에는 넣지 않는다.
+
 ## Amoy 배포
 
 ```bash
@@ -84,6 +93,7 @@ npm run deploy:amoy --workspace=contracts/cube-nft
 |---|---|
 | `npm run typecheck` | contracts + server `tsc --noEmit` |
 | `npm run test:unit` / `test:contract` / `test:integration` / `test:api` | server unit · Hardhat · 실제 체인+DB integration · 전체 HTTP e2e(OpenAPI contract test 포함) |
+| `npm run test:integration:process` | T10 실제 process-kill 복구 — `node dist/main.js` 자식 프로세스 기동 → `SIGKILL` → 새 프로세스가 저장된 raw tx로 동일 txHash 재전송. Hardhat node + 마이그레이션된 DB 필요, opt-in(기본 회귀 제외) |
 | `npm run test:nonfunctional` | 민감정보 redaction corpus + 다중 규칙 scanner 검증 |
 | `npm run test:amoy` | Amoy 인수(`server/scripts/amoy-acceptance.ts`) — `AMOY_RPC_URL_PRIMARY`, 자금 있는 `MINT/RELAYER_SIGNER_PRIVATE_KEY`, `contracts/deployments/amoy.json` 필요. 없으면 **실패**(skip 아님). JSON 리포트는 `reports/` |
 | `npm run auth:headers -- --method POST --path /internal/v1/wallets --body '{"userId":"u1"}' [--scope operator] [--jwt '{...}'] [--out file]` | curl `-H @file`용 HMAC(+승인 JWT) 헤더 생성. secret은 출력하지 않음 |

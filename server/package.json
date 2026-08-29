@@ -17,6 +17,7 @@
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:integration": "jest --config ./test/jest-integration.json --runInBand",
+    "test:process": "nest build && jest --config ./test/jest-process.json --runInBand --forceExit",
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:generate": "npm run typeorm -- migration:generate -d src/shared/database/data-source.ts",
     "migration:run": "npm run typeorm -- migration:run -d src/shared/database/data-source.ts",

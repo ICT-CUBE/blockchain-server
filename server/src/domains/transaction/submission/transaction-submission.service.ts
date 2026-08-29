@@ -131,6 +131,12 @@ export class TransactionSubmissionService implements TransactionSubmissionPort {
 
     // Stage 4 — broadcast. Failure here is *not* an error for the caller: the SIGNED row is durable
     // and will be re-broadcast by the recovery worker (or escalated, see `broadcast`).
+    if (this.appConfig.submission.pauseBeforeBroadcast) {
+      // T10 process-kill spec: leave the SIGNED attempt un-broadcast so a SIGKILL here is exactly
+      // "crashed after committing the raw tx, before broadcast".
+      this.logger.warn(`SUBMISSION_PAUSE_BEFORE_BROADCAST: attempt ${attemptId} left SIGNED, not broadcast`);
+      return { attemptId, attemptNo, txHash };
+    }
     await this.broadcast(attemptId, request.chainId, signerAddress, signedRawTransaction, 0);
 
     return { attemptId, attemptNo, txHash };

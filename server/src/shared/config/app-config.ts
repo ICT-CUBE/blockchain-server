@@ -67,6 +67,9 @@ export interface SubmissionConfig {
   readonly broadcastMaxRetries: number;
   readonly broadcastMaxBackoffMs: number;
   readonly nonceReservationLeaseMs: number;
+  /** TEST ONLY: `submit()` skips the broadcast and the recovery worker stays idle (T10
+   * process-kill spec). Always `false` unless `NODE_ENV=test`. */
+  readonly pauseBeforeBroadcast: boolean;
 }
 
 export interface ConfirmationConfig {
@@ -218,6 +221,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       broadcastMaxRetries: parsedEnv.BROADCAST_MAX_RETRIES,
       broadcastMaxBackoffMs: parsedEnv.BROADCAST_MAX_BACKOFF_MS,
       nonceReservationLeaseMs: parsedEnv.NONCE_RESERVATION_LEASE_MS,
+      pauseBeforeBroadcast: parsedEnv.NODE_ENV === 'test' && parsedEnv.SUBMISSION_PAUSE_BEFORE_BROADCAST,
     }),
     confirmation: Object.freeze({
       blocksRequired: parsedEnv.CONFIRMATION_BLOCKS_REQUIRED,
