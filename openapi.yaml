@@ -572,10 +572,10 @@ components:
       properties:
         tokenId: {$ref: '#/components/schemas/TokenId'}
         cubeNumber: {type: string, minLength: 1, maxLength: 64}
-        publicGrade: {type: string, minLength: 1, maxLength: 64}
+        publicGrade: {type: string, minLength: 1, maxLength: 64, description: 미래 CUBE 등급 확장을 고려한 예약 필드. 현재 서비스에는 등급 정책과 Backend 원천 데이터가 없으며 구현 호환성을 위해서만 필수로 남아 있다. A/GOLD/SPECIAL은 테스트 fixture일 뿐 확정 enum이 아니다.}
         imageBase64: {type: string, minLength: 1, description: strict standard base64}
         imageMimeType: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif], description: 선언 시 bytes와 일치해야 함}
-        benefitReferenceId: {type: string, minLength: 1, maxLength: 200, description: 불변 참조만 보관. 혜택 내용·활성화는 Backend 책임.}
+        benefitReferenceId: {type: string, minLength: 1, maxLength: 200, description: 미래 혜택 또는 증명서 정보를 가리킬 불변 참조 ID로 예약한 필드. 혜택 내용 자체가 아니다. 현재 혜택은 CUBE마다 동일한 한정판 가치뿐이며 대응 Backend 데이터가 없어 구현 호환성을 위해서만 필수로 남아 있다.}
     MetadataPrepared:
       type: object
       required: [tokenId, metadataCid, tokenUri, ready]
