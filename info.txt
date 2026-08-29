@@ -1,0 +1,184 @@
+# ARZONE Blockchain Server 통합 환경 변수 템플릿
+#
+# 다른 PC에서 사용하는 방법
+# 1. 이 파일의 내용을 프로젝트 루트의 `.env`로 복사한다.
+# 2. `<...>`로 표시된 값을 실제 개발 환경 값으로 교체한다.
+# 3. 사용하지 않는 조건부 항목은 주석 상태로 둔다.
+# 4. `.env`와 개인키/secret은 Git에 커밋하지 않는다.
+#
+# Secret 생성 예시
+# Base64url 32바이트:
+# node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+# Base64 32바이트(RAW_TX_ENCRYPTION_KEY):
+# node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+
+# =============================================================================
+# 1. Blockchain Server 기본 설정
+# =============================================================================
+NODE_ENV=development
+PORT=3100
+
+# 로컬: hardhatMainnet 또는 hardhatOp
+# 통합 테스트에서 localhost를 사용할 수 있음
+# Polygon 테스트넷: amoy
+CUBE_NFT_NETWORK=hardhatMainnet
+
+# 배포 artifact 디렉터리를 직접 지정할 때만 설정
+# CUBE_NFT_DEPLOYMENTS_DIR=<absolute-or-relative-deployments-directory>
+
+# =============================================================================
+# 2. Blockchain Server 전용 MySQL
+# =============================================================================
+DATABASE_URL=mysql://cube_nft:cube_nft@127.0.0.1:3306/cube_nft
+DATABASE_POOL_MIN=0
+DATABASE_POOL_MAX=10
+
+# =============================================================================
+# 3. Backend -> Blockchain Server HMAC 인증
+# Secret은 Base64url 디코딩 후 최소 32바이트
+# =============================================================================
+HMAC_INBOUND_KEY_ID=backend-v1
+HMAC_INBOUND_KEY_SECRET=<base64url-32-byte-secret>
+
+# 90일 키 회전 중에만 두 항목을 함께 설정
+# HMAC_INBOUND_PREVIOUS_KEY_ID=backend-previous
+# HMAC_INBOUND_PREVIOUS_KEY_SECRET=<base64url-32-byte-previous-secret>
+
+# =============================================================================
+# 4. ARZONE 승인 JWT (HS256, 최대 유효기간 30분)
+# HMAC 키와 별도의 secret을 사용
+# =============================================================================
+APPROVAL_JWT_SECRET=<base64url-32-byte-secret>
+APPROVAL_JWT_ISSUER=arzone-backend
+APPROVAL_JWT_AUDIENCE=arzone-blockchain-server
+
+# =============================================================================
+# 5. 사용자 수탁 지갑
+# =============================================================================
+# 로컬 개발: fake
+# 실제 Web3Auth 연동: web3auth
+CUSTODIAL_WALLET_PROVIDER=fake
+WEB3AUTH_NETWORK=sapphire_devnet
+WEB3AUTH_CHAIN_ID=80002
+
+# CUSTODIAL_WALLET_PROVIDER=web3auth일 때 설정
+# WEB3AUTH_CLIENT_ID=<web3auth-client-id>
+# WEB3AUTH_RPC_TARGET=<polygon-rpc-url>
+# WEB3AUTH_AUTH_CONNECTION_ID=<web3auth-auth-connection-id>
+# WEB3AUTH_JWT_SIGNING_PRIVATE_KEY=<es256-private-key-pem-with-literal-backslash-n>
+# WEB3AUTH_JWT_SIGNING_KEY_ID=<web3auth-signing-key-id>
+
+# =============================================================================
+# 6. CubeNFT 컨트랙트 배포 역할 주소
+# 로컬 배포에서는 생략 가능하며 Hardhat 개발 계정으로 대체됨
+# Amoy 등 비로컬 배포에서는 반드시 실제 주소를 설정
+# =============================================================================
+# CUBE_NFT_ADMIN_ADDRESS=<0x-admin-address>
+# CUBE_NFT_MINTER_ADDRESS=<0x-minter-address>
+# CUBE_NFT_RELAYER_ADDRESS=<0x-relayer-address>
+# CUBE_NFT_PAUSER_ADDRESS=<0x-pauser-address>
+
+# =============================================================================
+# 7. Polygon Amoy 컨트랙트 배포
+# Amoy를 사용하지 않으면 생략
+# =============================================================================
+# AMOY_RPC_URL_PRIMARY=<amoy-rpc-url>
+# AMOY_DEPLOYER_PRIVATE_KEY=<0x-64-hex-private-key>
+
+# =============================================================================
+# 8. 트랜잭션 제출, RBF, Confirmation, Reconciliation
+# =============================================================================
+# RAW_TX_ENCRYPTION_KEY는 모든 환경에서 필수이며 Base64 디코딩 결과가 정확히 32바이트
+RAW_TX_ENCRYPTION_KEY=<base64-exactly-32-byte-key>
+
+# 비로컬 네트워크에서는 아래 세 항목이 필수
+# 로컬 Hardhat 네트워크에서는 개발 기본값 사용 가능
+# TRANSACTION_RPC_URL_PRIMARY=<primary-rpc-url>
+# TRANSACTION_RPC_URL_BACKUP=<backup-rpc-url>
+# MINT_SIGNER_PRIVATE_KEY=<0x-64-hex-private-key>
+# RELAYER_SIGNER_PRIVATE_KEY=<0x-64-hex-private-key>
+
+SUBMISSION_POLL_INTERVAL_MS=2000
+# 테스트 전용 (T10 process-kill 검증). `1`/`true` AND `NODE_ENV=test`일 때만 활성화.
+# 운영 환경에서는 loadConfig가 무시한다. 평소에는 설정하지 말 것.
+# SUBMISSION_PAUSE_BEFORE_BROADCAST=0
+RBF_THRESHOLD_MS=300000
+RBF_MAX_ATTEMPTS=3
+RBF_FEE_BUMP_PERCENT=15
+CONFIRMATION_BLOCKS_REQUIRED=5
+RECONCILIATION_POLL_INTERVAL_MS=5000
+RECONCILIATION_BATCH_SIZE=20
+OWNER_CONSENT_DEADLINE_SECONDS=600
+
+# =============================================================================
+# 9. Blockchain Server -> Backend 완료 Webhook
+# =============================================================================
+NOTIFICATION_CALLBACK_URL=http://127.0.0.1:4100/webhook
+HMAC_OUTBOUND_KEY_ID=outbound-v1
+HMAC_OUTBOUND_KEY_SECRET=<base64url-32-byte-secret>
+NOTIFICATION_TIMEOUT_MS=10000
+NOTIFICATION_MAX_AUTO_RETRIES=6
+NOTIFICATION_BASE_BACKOFF_MS=2000
+NOTIFICATION_MAX_BACKOFF_MS=300000
+NOTIFICATION_POLL_INTERVAL_MS=2000
+NOTIFICATION_BATCH_SIZE=20
+
+# =============================================================================
+# 10. NFT Metadata 및 IPFS
+# =============================================================================
+# 로컬 개발: fake
+# Pinata(hot pin) + Filebase(장기 보존) 실제 연동: real
+METADATA_PROVIDER=fake
+METADATA_HTTP_TIMEOUT_MS=15000
+
+# METADATA_PROVIDER=real일 때 두 항목 모두 필수
+# PINATA_JWT=<pinata-jwt>
+# FILEBASE_PIN_TOKEN=<filebase-per-bucket-pinning-token>
+# FILEBASE_PIN_ENDPOINT=https://api.filebase.io/v1/ipfs
+
+# =============================================================================
+# 11. 로그, 감사 기록, 운영자 API 인증
+# =============================================================================
+LOG_LEVEL=log
+LONG_PENDING_THRESHOLD_MS=1800000
+HMAC_OPERATOR_KEY_ID=operator-v1
+HMAC_OPERATOR_KEY_SECRET=<base64url-32-byte-secret>
+
+# 운영자 키 회전 중에만 두 항목을 함께 설정
+# HMAC_OPERATOR_PREVIOUS_KEY_ID=operator-previous
+# HMAC_OPERATOR_PREVIOUS_KEY_SECRET=<base64url-32-byte-previous-secret>
+
+# =============================================================================
+# 12. 거버넌스 이전 스크립트
+# transfer-governance 스크립트를 실행할 때 사용
+# =============================================================================
+# rehearsal 또는 mainnet
+GOVERNANCE_TARGET=rehearsal
+
+# 쉼표로 구분한 주소 목록
+CUBE_NFT_TIMELOCK_PROPOSER_ADDRESSES=<0x-proposer-address>
+
+# 생략하면 proposer 주소 목록을 executor로 사용
+# CUBE_NFT_TIMELOCK_EXECUTOR_ADDRESSES=<0x-executor-address-1,0x-executor-address-2>
+
+# 48시간
+CUBE_NFT_TIMELOCK_MIN_DELAY_SECONDS=172800
+
+# =============================================================================
+# 13. 개발용 Mock Receiver
+# Mock Receiver를 별도로 실행할 때 사용
+# =============================================================================
+MOCK_RECEIVER_PORT=4100
+
+# 반드시 HMAC_OUTBOUND_KEY_SECRET과 같은 값을 사용
+MOCK_RECEIVER_HMAC_SECRET=<same-value-as-HMAC_OUTBOUND_KEY_SECRET>
+
+# 최초 N개의 서로 다른 알림을 의도적으로 실패시킴
+MOCK_RECEIVER_FAIL_COUNT=0
+
+# =============================================================================
+# 14. 운영체제 제공 변수
+# =============================================================================
+# USER는 수동 Notification 재전달 감사 로그의 actor로 자동 사용된다.
+# 일반적으로 운영체제가 제공하므로 .env에 직접 설정할 필요가 없다.
+# USER=<operator-name>

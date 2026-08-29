@@ -130,8 +130,34 @@ runner로 전달한다(`npm run test:contract -- --grep <regex>`, `npm run test:
   - 상태 갱신: `reconcilePreservation(tokenId)`(read-only, `prepare()` 말미·`GET /metadata/:id`)는 `checkStatus`만. stale 복구·재제출은 **`PreservationReconciliationWorker`**(interval)가 담당 — `prepare()` 재호출에 의존하지 않음.
   - 멱등성 + fencing: 이미 `PRESERVED`거나 제출 중인 CID는 재제출 안 함. `PENDING(id 없음)`/`FAILED`/stale `SUBMITTING`만 새 `preservation_claim_token`으로 원자적 claim(→`SUBMITTING`) 후 1회 제출. `preserve()` 결과는 claim token이 여전히 일치할 때만 반영 → 재claim된 뒤 늦게 돌아온 이전 submitter가 새 세대를 덮어쓰지 못함. 외부 exactly-once는 미보장(같은 CID pin이라는 멱등적 결과로 수렴).
 
+## 남은 작업 (프로덕션/서비스 배포 전)
+
+로컬에서 증명 가능한 범위(기능 구현, 자동 검증)는 완료 상태다 — server unit·contracts·실제 로컬
+체인+MySQL integration·전체 HTTP e2e·T10 process-kill 복구·OpenAPI 계약·민감정보 스캐너·Docker
+smoke 모두 통과 (최신 수치는 `docs/verification/개발-로그.md`). 아래는 **외부 자격증명·자금·운영
+환경**이 있어야 진행되는 항목이며, 코드 결함이 아니다.
+
+### 외부 연동 4개 (전부 어댑터/설정으로 분리돼 있음)
+
+| 연동 | 필요한 것 | 현재 상태 |
+|---|---|---|
+| **ARZONE Backend** | HMAC 키 교환(inbound/outbound/operator), 승인 JWT secret 공유, 백엔드가 보내는 실제 payload로 계약 검증, `NOTIFICATION_CALLBACK_URL` 완료 webhook 수신 확인 | 코드·`openapi.yaml` 계약 완비. self-signed fixture로만 e2e 검증됨. `npm run auth:headers`로 헤더 생성 가능 |
+| **Polygon 네트워크** | Amoy → Mainnet 컨트랙트 배포(자금 있는 배포자 지갑), 실 RPC primary/backup, 실 가스·EIP-1559 추정, 폴리곤 블록 시간에 맞춘 `RBF_THRESHOLD_MS` 등 튜닝, `npm run test:amoy` 인수 통과 | 로컬 Hardhat로만 검증. deployer POL 잔액 0 (faucet 차단) → BLOCKED |
+| **Web3Auth (수탁 지갑)** | `CUSTODIAL_WALLET_PROVIDER=web3auth` + `WEB3AUTH_CLIENT_ID`·`WEB3AUTH_RPC_TARGET`·`WEB3AUTH_AUTH_CONNECTION_ID` 등 발급, 실제 키 생성·서명 경로 검증 | 기본값 `CUSTODIAL_WALLET_PROVIDER=fake` (결정적 fake 어댑터) 사용 중 |
+| **IPFS 핀 (Pinata + Filebase)** | `METADATA_PROVIDER=real` + `PINATA_JWT`·`FILEBASE_PIN_TOKEN` | 기본값 `METADATA_PROVIDER=fake` 사용 중. 보존은 best-effort라 Mint는 비차단 |
+
+### 프로덕션 준비 항목 (연동은 아님)
+
+- **raw tx 암호화 키**: `RAW_TX_ENCRYPTION_KEY`는 현재 개발용 평문 AES-256-GCM 키. 프로덕션은 KMS envelope 암호화로 교체 필요 (`raw-transaction-cipher.ts` 주석, TASK-10 §5).
+- **시크릿 provisioning / 배포 파이프라인**: `.env` 실제 값 주입, 컨테이너 배포. `server/Dockerfile` + `npm run smoke:docker`까지 준비됨.
+- **모니터링·알럿**: signer halt(`signer_locks.halted_reason`), nonce gap(`SIGNER_NONCE_GAP`), `REVIEW_REQUIRED` 큐 감시. 운영자 복구 API는 구현됨(`/internal/v1/audit/operations/{id}/resolve-review`, `npm run fill-nonce-gap`).
+- **의존성 취약점**: `npm audit` moderate 12 / low 6 — `@web3auth` → `@metamask/*` → `uuid`. Web3Auth 버전 업과 묶여 있어 단독 해결 불가.
+
 ## 문서
 
+- **`../docs/설정/TEAM_ENV_GUIDE.md`** — 팀원이 저장소를 받아 환경을 구성하고 서버를 기동하기 위한 환경변수·실행 가이드
+- **`../docs/api/TEAM_API_GUIDE.md`** — Backend 인증, API 호출 순서, Operation 상태, 완료 webhook 연동 가이드
+- **`../docs/NEXT_STEPS.md`** — Backend·외부 provider·Polygon·운영 배포의 남은 작업과 완료 조건
 - 구현 계획, 요구사항, 검증 계획, 개발 로그, AC 추적표 — 이 저장소 상위 `docs/` (비버전관리 영역)
 - **`openapi.yaml`** (저장소 루트) — 내부 API 계약의 버전관리 원본. `openapi-contract.e2e-spec.ts`가 실제 응답을 이 파일로 검증한다. Backend 핸드오프용 사본이 `docs/`에 있을 수 있으나 이 파일이 정본이다.
 - `.env.example` — 전체 환경변수 목록과 각 TASK별 설명
