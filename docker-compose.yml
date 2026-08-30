@@ -8,7 +8,7 @@ services:
       MYSQL_PASSWORD: cube_nft
       MYSQL_ROOT_PASSWORD: cube_nft_root
     ports:
-      - '3306:3306'
+      - '3307:3306'
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
@@ -30,6 +30,10 @@ services:
       PORT: 3100
     ports:
       - '3100:3100'
+    volumes:
+      # The local Hardhat deployment is generated on the Windows host after the image is built.
+      # Mount it so a chain reset does not leave the server using an artifact baked into an old image.
+      - ./contracts/deployments:/workspace/contracts/deployments:ro
     depends_on:
       mysql:
         condition: service_healthy
