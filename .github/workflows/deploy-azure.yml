@@ -31,7 +31,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: server/Dockerfile
+          file: server/Dockerfile.azure-hardhat
           push: true
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
@@ -44,6 +44,20 @@ jobs:
 
       - name: Deploy image to Azure App Service
         run: |
+          az webapp config appsettings delete \
+            --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --name "${{ env.WEBAPP_NAME }}" \
+            --setting-names \
+              AMOY_DEPLOYER_PRIVATE_KEY \
+              AMOY_RPC_URL_PRIMARY \
+              CUBE_NFT_ADMIN_ADDRESS \
+              CUBE_NFT_MINTER_ADDRESS \
+              CUBE_NFT_RELAYER_ADDRESS \
+              CUBE_NFT_PAUSER_ADDRESS \
+              MINT_SIGNER_PRIVATE_KEY \
+              RELAYER_SIGNER_PRIVATE_KEY \
+              TRANSACTION_RPC_URL_BACKUP
+
           az webapp config container set \
             --resource-group "${{ env.RESOURCE_GROUP }}" \
             --name "${{ env.WEBAPP_NAME }}" \
@@ -55,7 +69,15 @@ jobs:
           az webapp config appsettings set \
             --resource-group "${{ env.RESOURCE_GROUP }}" \
             --name "${{ env.WEBAPP_NAME }}" \
-            --settings PORT=3100 WEBSITES_PORT=3100
+            --settings \
+              PORT=3100 \
+              WEBSITES_PORT=3100 \
+              WEBSITES_CONTAINER_START_TIME_LIMIT=600 \
+              CUBE_NFT_NETWORK=localhost \
+              TRANSACTION_RPC_URL_PRIMARY=http://127.0.0.1:8545 \
+              WEB3AUTH_CHAIN_ID=31337 \
+              WEB3AUTH_RPC_TARGET=http://127.0.0.1:8545 \
+              CONFIRMATION_BLOCKS_REQUIRED=1
 
           az webapp restart \
             --resource-group "${{ env.RESOURCE_GROUP }}" \

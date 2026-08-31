@@ -92,9 +92,12 @@ npm run deploy:amoy --workspace=contracts/cube-nft
 - 컨테이너 이미지는 `haniumacr.azurecr.io/hanium-blockchain`에 저장한다.
 - Blockchain Server DB는 기존 `hanium-mysql` 서버의 별도 `cube_nft` 데이터베이스를 사용한다.
 - Azure Database for MySQL 연결에서는 `DATABASE_SSL_ENABLED=true`를 설정한다.
-- 컨테이너 시작 시 미적용 TypeORM migration을 먼저 실행한 뒤 서버를 시작한다.
+- 개발 서버는 별도 `server/Dockerfile.azure-hardhat` 이미지에서 내부 Hardhat 체인을 실행한다.
+- 컨테이너 시작 시 Hardhat 체인 기동, CubeNFT 배포, 미적용 TypeORM migration, 서버 시작 순서로 실행한다.
 - `main` 브랜치에 push하면 `.github/workflows/deploy-azure.yml`이 이미지를 빌드하고 ACR과 App Service에 배포한다.
 - Web App의 외부 주소는 `https://hanium-blockchain.azurewebsites.net`이다.
+- Hardhat 체인 상태는 컨테이너 재시작이나 재배포 시 초기화된다. 이 구성은 개발 및 시연 전용이며 실제 자산을 저장하지 않는다.
+- App Service 인스턴스는 1개만 사용해야 한다. 여러 인스턴스가 각자 다른 Hardhat 체인을 만들 수 있기 때문이다.
 
 Azure Web App에는 `.env.example`의 필수값과 함께 다음 배포 환경값이 필요하다.
 
@@ -102,13 +105,17 @@ Azure Web App에는 `.env.example`의 필수값과 함께 다음 배포 환경�
 NODE_ENV=production
 PORT=3100
 WEBSITES_PORT=3100
-CUBE_NFT_NETWORK=amoy
+CUBE_NFT_NETWORK=localhost
 DATABASE_SSL_ENABLED=true
-TRANSACTION_RPC_URL_PRIMARY=https://polygon-amoy.drpc.org
+TRANSACTION_RPC_URL_PRIMARY=http://127.0.0.1:8545
+WEB3AUTH_CHAIN_ID=31337
+WEB3AUTH_RPC_TARGET=http://127.0.0.1:8545
+CONFIRMATION_BLOCKS_REQUIRED=1
 NOTIFICATION_CALLBACK_URL=https://hanium.azurewebsites.net/api/v1/internal/blockchain/notifications
 ```
 
-민감한 DB URL, HMAC/JWT 키, 트랜잭션 암호화 키와 signer private key는 Git이나 `.env.example`에 기록하지 않고 Azure App Service 환경변수로만 관리한다.
+민감한 DB URL, HMAC/JWT 키와 트랜잭션 암호화 키는 Git이나 `.env.example`에 기록하지 않고 Azure App Service 환경변수로만 관리한다.
+Hardhat 개발 서버의 signer는 공개된 고정 개발 계정을 사용하므로 별도 private key를 설정하지 않는다.
 
 ## 검증 계획서 명령 (2026-08-28 remediation)
 
