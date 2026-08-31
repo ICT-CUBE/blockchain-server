@@ -17,12 +17,14 @@ const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   throw new Error('Missing required environment variable: DATABASE_URL');
 }
+const databaseSslEnabled = process.env.DATABASE_SSL_ENABLED === 'true';
 
 // A single default export only — the TypeORM CLI's `loadDataSource` rejects a file with more than
 // one exported DataSource-typed binding.
 const dataSource = new DataSource({
   type: 'mysql',
   url: databaseUrl,
+  ssl: databaseSslEnabled ? { rejectUnauthorized: true } : undefined,
   // Same UTC contract as the runtime `DatabaseModule` — see the note there (검증 D4/D5).
   timezone: 'Z',
   entities: ALL_ENTITIES,

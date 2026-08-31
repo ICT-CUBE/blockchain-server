@@ -12,6 +12,7 @@ const LOCAL_DEV_RPC_URL_PRIMARY = 'http://127.0.0.1:8545';
 
 export interface DatabaseConfig {
   readonly url: string;
+  readonly sslEnabled: boolean;
   readonly poolMin: number;
   readonly poolMax: number;
 }
@@ -175,6 +176,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cubeNft,
     database: Object.freeze({
       url: parsedEnv.DATABASE_URL,
+      sslEnabled: parsedEnv.DATABASE_SSL_ENABLED,
       poolMin: parsedEnv.DATABASE_POOL_MIN,
       poolMax: parsedEnv.DATABASE_POOL_MAX,
     }),

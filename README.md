@@ -85,6 +85,31 @@ npm run deploy:amoy --workspace=contracts/cube-nft
 
 `AMOY_RPC_URL_PRIMARY`, `AMOY_DEPLOYER_PRIVATE_KEY`가 `.env`에 필요하다. 배포자 지갑에는 실제 Amoy POL 잔액이 있어야 한다.
 
+## Azure 개발 서버 배포
+
+- Blockchain Server는 `hanium-blockchain` Web App에서 실행한다.
+- FastAPI와 같은 `hanium-plan`을 사용하지만 서로 독립된 Web App과 컨테이너 이미지로 배포한다.
+- 컨테이너 이미지는 `haniumacr.azurecr.io/hanium-blockchain`에 저장한다.
+- Blockchain Server DB는 기존 `hanium-mysql` 서버의 별도 `cube_nft` 데이터베이스를 사용한다.
+- Azure Database for MySQL 연결에서는 `DATABASE_SSL_ENABLED=true`를 설정한다.
+- 컨테이너 시작 시 미적용 TypeORM migration을 먼저 실행한 뒤 서버를 시작한다.
+- `main` 브랜치에 push하면 `.github/workflows/deploy-azure.yml`이 이미지를 빌드하고 ACR과 App Service에 배포한다.
+- Web App의 외부 주소는 `https://hanium-blockchain.azurewebsites.net`이다.
+
+Azure Web App에는 `.env.example`의 필수값과 함께 다음 배포 환경값이 필요하다.
+
+```env
+NODE_ENV=production
+PORT=3100
+WEBSITES_PORT=3100
+CUBE_NFT_NETWORK=amoy
+DATABASE_SSL_ENABLED=true
+TRANSACTION_RPC_URL_PRIMARY=https://polygon-amoy.drpc.org
+NOTIFICATION_CALLBACK_URL=https://hanium.azurewebsites.net/api/v1/internal/blockchain/notifications
+```
+
+민감한 DB URL, HMAC/JWT 키, 트랜잭션 암호화 키와 signer private key는 Git이나 `.env.example`에 기록하지 않고 Azure App Service 환경변수로만 관리한다.
+
 ## 검증 계획서 명령 (2026-08-28 remediation)
 
 `docs/5. 검증 계획서.md` §4가 호출하는 이름 그대로 root script를 제공한다.

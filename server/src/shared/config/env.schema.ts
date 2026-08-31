@@ -28,6 +28,10 @@ const baseEnvSchema = z.object({
   /** `mysql://user:password@host:port/database` — the Blockchain Server's own MySQL, never the
    * Backend's (TASK-04 §9). */
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  DATABASE_SSL_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   DATABASE_POOL_MIN: z.coerce.number().int().min(0).default(0),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
 

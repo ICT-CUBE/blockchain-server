@@ -46,6 +46,7 @@ describe('loadConfig', () => {
     expect(config.cubeNft.deployment.proxyAddress).toBe('0x1111111111111111111111111111111111111111');
     expect(config.cubeNft.abi.length).toBeGreaterThan(0);
     expect(config.database.url).toBe('mysql://user:pass@127.0.0.1:3306/cube_nft_test');
+    expect(config.database.sslEnabled).toBe(false);
     expect(config.database.poolMax).toBe(10);
     expect(config.hmacInbound.current.keyId).toBe('backend-v1');
     expect(config.hmacInbound.current.secret).toEqual(Buffer.from(TEST_SECRET_A, 'base64url'));
@@ -61,6 +62,11 @@ describe('loadConfig', () => {
     expect(config.hmacOperator.current.keyId).toBe('operator-v1');
     expect(config.hmacOperator.previous).toBeNull();
     expect(config.submission.pauseBeforeBroadcast).toBe(false);
+  });
+
+  it('enables database TLS only when explicitly configured', () => {
+    expect(loadConfig(baseEnv({ DATABASE_SSL_ENABLED: 'true' })).database.sslEnabled).toBe(true);
+    expect(loadConfig(baseEnv({ DATABASE_SSL_ENABLED: 'false' })).database.sslEnabled).toBe(false);
   });
 
   it('SUBMISSION_PAUSE_BEFORE_BROADCAST is honoured only under NODE_ENV=test (never in production)', () => {

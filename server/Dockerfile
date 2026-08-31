@@ -36,4 +36,6 @@ COPY --from=build /workspace/package.json ./package.json
 EXPOSE 3100
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3100)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-CMD ["node", "server/dist/main.js"]
+# Migrations are idempotent. Running them before the server starts keeps a newly provisioned
+# App Service database in sync without exposing the database to a GitHub-hosted runner.
+CMD ["sh", "-c", "node node_modules/typeorm/cli.js migration:run -d server/dist/shared/database/data-source.js && exec node server/dist/main.js"]

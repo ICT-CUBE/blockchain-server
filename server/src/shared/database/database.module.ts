@@ -28,6 +28,7 @@ export class DatabaseTimezoneEnforcer implements OnApplicationBootstrap {
       useFactory: (config: AppConfigService) => ({
         type: 'mysql' as const,
         url: config.database.url,
+        ssl: config.database.sslEnabled ? { rejectUnauthorized: true } : undefined,
         // Every TIMESTAMP(3) column is stored and read as UTC regardless of the host process's TZ.
         // Without this, mysql2 interprets DB values in the *local* zone (KST on a developer
         // machine), shifting every API/webhook/audit timestamp by the UTC offset and making
